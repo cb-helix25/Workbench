@@ -17,4 +17,6 @@ app.get("/", (_req, res) => {
 
 app.listen(port, () => {
   console.log(`[REPORTING-HUB] Server listening on http://localhost:${port}`);
+  console.log(`[REPORTING-HUB] Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`[REPORTING-HUB] Logging enabled at: ${new Date().toISOString()}`);
 });

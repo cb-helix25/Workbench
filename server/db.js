@@ -2,49 +2,54 @@ const sql = require("mssql");
 const { DefaultAzureCredential } = require("@azure/identity");
 const { SecretClient } = require("@azure/keyvault-secrets");
 
-const sqlServer = process.env.REPORTING_DB_SERVER || "helix-database-server.database.windows.net";
-const sqlUser = process.env.REPORTING_DB_USER || "helix-database-server";
-const sqlDatabase = process.env.REPORTING_DB_NAME || "helix-project-data";
-const secretName = process.env.REPORTING_DB_SECRET || "helix-database-password";
+const sqlServer = "helix-database-server.database.windows.net";
+const sqlUser = "helix-database-server";
+const sqlDatabase = "helix-project-data";
+const secretName = "helix-database-password";
+const keyVaultUrl = "https://helix-keys.vault.azure.net/";
 
-let poolPromise;
+let reportingPool = null;
 
-async function getSqlPassword() {
-  const keyVaultUrl = process.env.KEY_VAULT_URL;
-  if (!keyVaultUrl) {
-    throw new Error("KEY_VAULT_URL environment variable is not set.");
+async function getReportingPool() {
+  if (reportingPool) {
+    return reportingPool;
   }
 
   const credential = new DefaultAzureCredential();
   const secretClient = new SecretClient(keyVaultUrl, credential);
-  const secret = await secretClient.getSecret(secretName);
-  const sqlPassword = secret && secret.value;
+  
+  let sqlPassword;
+  
+  try {
+    const secret = await secretClient.getSecret(secretName);
+    sqlPassword = secret && secret.value;
+  } catch (error) {
+    throw new Error(
+      `Failed to fetch SQL password from Key Vault: ${error.message || error}`
+    );
+  }
 
   if (!sqlPassword) {
     throw new Error(`SQL password secret "${secretName}" does not contain a value.`);
   }
 
-  return sqlPassword;
-}
+  try {
+    const pool = new sql.ConnectionPool({
+      server: sqlServer,
+      user: sqlUser,
+      password: sqlPassword,
+      database: sqlDatabase,
+      options: { encrypt: true }
+    });
 
-async function getReportingPool() {
-  if (!poolPromise) {
-    poolPromise = (async () => {
-      const sqlPassword = await getSqlPassword();
-      const pool = new sql.ConnectionPool({
-        server: sqlServer,
-        user: sqlUser,
-        password: sqlPassword,
-        database: sqlDatabase,
-        options: { encrypt: true }
-      });
-
-      await pool.connect();
-      return pool;
-    })();
+    await pool.connect();
+    reportingPool = pool;
+    return reportingPool;
+  } catch (error) {
+    throw new Error(
+      `Failed to connect to SQL Server: ${error.message || error}`
+    );
   }
-
-  return poolPromise;
 }
 
 module.exports = {

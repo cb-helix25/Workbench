@@ -11,15 +11,21 @@
     "dev": "nodemon server/index.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "mssql": "^10.0.1",
     "@azure/identity": "^4.0.0",
-    "@azure/keyvault-secrets": "^4.7.0"
+    "@azure/keyvault-secrets": "^4.7.0",
+    "dotenv": "^17.2.3",
+    "express": "^4.18.2",
+    "mssql": "^10.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
   },
-  "keywords": ["reporting", "azure", "sql", "express"],
+  "keywords": [
+    "reporting",
+    "azure",
+    "sql",
+    "express"
+  ],
   "author": "",
   "license": "ISC"
 }

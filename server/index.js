@@ -1,8 +1,16 @@
 const path = require("path");
 const express = require("express");
+const { DefaultAzureCredential } = require("@azure/identity");
+const { SecretClient } = require("@azure/keyvault-secrets");
 const reportingRouter = require("./reportingRouter");
 
 const app = express();
+
+// Initialize Azure Key Vault client
+const keyVaultUrl = process.env.KEY_VAULT_URL || "https://secret-keys-helix.vault.azure.net/";
+const credential = new DefaultAzureCredential();
+const secretClient = new SecretClient(keyVaultUrl, credential);
+app.locals.secretClient = secretClient;
 const port = process.env.REPORTING_PORT || 5055;
 
 app.use(express.json({ limit: "1mb" }));

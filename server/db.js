@@ -1,31 +1,29 @@
 const sql = require("mssql");
-const { DefaultAzureCredential } = require("@azure/identity");
-const { SecretClient } = require("@azure/keyvault-secrets");
 
 const sqlServer = "helix-database-server.database.windows.net";
 const sqlUser = "helix-database-server";
 const sqlDatabase = "helix-project-data";
 const secretName = "helix-database-password";
-const keyVaultUrl = "https://helix-keys.vault.azure.net/";
 
 let reportingPool = null;
 
-async function getReportingPool() {
+async function getReportingPool(secretClient) {
   if (reportingPool) {
     return reportingPool;
   }
 
-  const credential = new DefaultAzureCredential();
-  const secretClient = new SecretClient(keyVaultUrl, credential);
-  
+  if (!secretClient) {
+    throw new Error("SecretClient instance is required to fetch SQL credentials.");
+  }
+
   let sqlPassword;
-  
+
   try {
     const secret = await secretClient.getSecret(secretName);
     sqlPassword = secret && secret.value;
   } catch (error) {
     throw new Error(
-      `Failed to fetch SQL password from Key Vault: ${error.message || error}`
+      `Failed to connect to SQL Server for helix-project-data DB: ${error.message || error}`
     );
   }
 
@@ -39,7 +37,7 @@ async function getReportingPool() {
       user: sqlUser,
       password: sqlPassword,
       database: sqlDatabase,
-      options: { encrypt: true }
+      options: { encrypt: true },
     });
 
     await pool.connect();
@@ -47,7 +45,7 @@ async function getReportingPool() {
     return reportingPool;
   } catch (error) {
     throw new Error(
-      `Failed to connect to SQL Server: ${error.message || error}`
+      `Failed to connect to SQL Server for helix-project-data DB: ${error.message || error}`
     );
   }
 }

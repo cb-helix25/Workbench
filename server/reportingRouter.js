@@ -12,8 +12,8 @@ function assertSafeIdentifier(value, label) {
   }
 }
 
-async function fetchColumns(schema, table) {
-  const pool = await getReportingPool();
+async function fetchColumns(schema, table, secretClient) {
+  const pool = await getReportingPool(secretClient);
   const result = await pool
     .request()
     .input("schema", sql.NVarChar, schema)
@@ -27,9 +27,10 @@ async function fetchColumns(schema, table) {
   return result.recordset;
 }
 
-router.get("/tables", async (_req, res) => {
+router.get("/tables", async (req, res) => {
   try {
-    const pool = await getReportingPool();
+    const secretClient = req.app.locals.secretClient;
+    const pool = await getReportingPool(secretClient);
     const result = await pool.request().query(
       `SELECT TABLE_SCHEMA, TABLE_NAME
        FROM INFORMATION_SCHEMA.TABLES
@@ -51,7 +52,8 @@ router.get("/tables/:schema/:table/columns", async (req, res) => {
     assertSafeIdentifier(schema, "schema");
     assertSafeIdentifier(table, "table");
 
-    const columns = await fetchColumns(schema, table);
+    const secretClient = req.app.locals.secretClient;
+    const columns = await fetchColumns(schema, table, secretClient);
     res.json({ schema, table, columns });
   } catch (error) {
     console.error("[REPORTING-HUB] Failed to load columns:", error);
@@ -67,7 +69,8 @@ router.get("/tables/:schema/:table/rows", async (req, res) => {
     assertSafeIdentifier(schema, "schema");
     assertSafeIdentifier(table, "table");
 
-    const pool = await getReportingPool();
+    const secretClient = req.app.locals.secretClient;
+    const pool = await getReportingPool(secretClient);
     const query = `SELECT TOP (${limit}) * FROM [${schema}].[${table}]`;
     const result = await pool.request().query(query);
     res.json({ schema, table, rows: result.recordset });
@@ -89,7 +92,8 @@ router.post("/tables/:schema/:table/insert", async (req, res) => {
       return res.status(400).json({ error: "values must be an object." });
     }
 
-    const columns = await fetchColumns(schema, table);
+    const secretClient = req.app.locals.secretClient;
+    const columns = await fetchColumns(schema, table, secretClient);
     const allowed = new Set(columns.map((col) => col.COLUMN_NAME));
     const entries = Object.entries(values).filter(([key]) => allowed.has(key));
 
@@ -100,7 +104,7 @@ router.post("/tables/:schema/:table/insert", async (req, res) => {
     const columnNames = entries.map(([key]) => `[${key}]`).join(", ");
     const paramNames = entries.map(([key]) => `@${key}`).join(", ");
 
-    const pool = await getReportingPool();
+    const pool = await getReportingPool(secretClient);
     const request = pool.request();
     entries.forEach(([key, value]) => {
       request.input(key, value);
@@ -136,7 +140,8 @@ router.patch("/tables/:schema/:table/update", async (req, res) => {
       return res.status(400).json({ error: "updates must be an object." });
     }
 
-    const columns = await fetchColumns(schema, table);
+    const secretClient = req.app.locals.secretClient;
+    const columns = await fetchColumns(schema, table, secretClient);
     const allowed = new Set(columns.map((col) => col.COLUMN_NAME));
 
     if (!allowed.has(keyColumn)) {
@@ -151,7 +156,7 @@ router.patch("/tables/:schema/:table/update", async (req, res) => {
 
     const setClause = entries.map(([key]) => `[${key}] = @${key}`).join(", ");
 
-    const pool = await getReportingPool();
+    const pool = await getReportingPool(secretClient);
     const request = pool.request();
     entries.forEach(([key, value]) => {
       request.input(key, value);
@@ -184,14 +189,15 @@ router.delete("/tables/:schema/:table/delete", async (req, res) => {
       return res.status(400).json({ error: "keyValue is required." });
     }
 
-    const columns = await fetchColumns(schema, table);
+    const secretClient = req.app.locals.secretClient;
+    const columns = await fetchColumns(schema, table, secretClient);
     const allowed = new Set(columns.map((col) => col.COLUMN_NAME));
 
     if (!allowed.has(keyColumn)) {
       return res.status(400).json({ error: "keyColumn is not a valid column." });
     }
 
-    const pool = await getReportingPool();
+    const pool = await getReportingPool(secretClient);
     const request = pool.request();
     request.input("keyValue", keyValue);
 

@@ -3,99 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Reporting Hub Starter</title>
+    <title>Helix Reporting Hub</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header class="page-header">
-      <div>
-        <h1>Reporting Hub Starter</h1>
-        <p>
-          A clean, standalone reporting hub that surfaces schema metadata and lets you view or edit
-          live database rows in one place.
-        </p>
-      </div>
-      <div class="status" id="statusMessage">Connecting…</div>
-    </header>
-
-    <main class="layout">
-      <section class="panel">
-        <h2>Database Explorer</h2>
-        <label class="field">
-          <span>Table</span>
-          <select id="tableSelect"></select>
-        </label>
-        <div class="schema">
-          <h3>Schema</h3>
-          <ul id="schemaList"></ul>
-        </div>
-      </section>
-
-      <section class="panel">
-        <h2>Data Preview</h2>
-        <div class="toolbar">
-          <button id="refreshButton">Refresh</button>
-          <span id="rowCount"></span>
-        </div>
-        <div class="table-wrap">
-          <table id="dataTable">
-            <thead></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="panel">
-        <h2>Quick Edit</h2>
-        <p class="hint">
-          Use the forms below to insert, update, or delete rows. Keep payloads small and test
-          carefully.
-        </p>
-
-        <form id="insertForm" class="form">
-          <h3>Insert</h3>
-          <label>
-            <span>Values (JSON)</span>
-            <textarea name="values" rows="4" placeholder='{"title":"New issue","priority":"High"}'></textarea>
-          </label>
-          <button type="submit">Insert Row</button>
-          <p class="form-status" data-form-status="insert"></p>
-        </form>
-
-        <form id="updateForm" class="form">
-          <h3>Update</h3>
-          <label>
-            <span>Key column</span>
-            <input name="keyColumn" placeholder="IssueId" />
-          </label>
-          <label>
-            <span>Key value</span>
-            <input name="keyValue" placeholder="123" />
-          </label>
-          <label>
-            <span>Updates (JSON)</span>
-            <textarea name="updates" rows="4" placeholder='{"priority":"Low"}'></textarea>
-          </label>
-          <button type="submit">Update Row</button>
-          <p class="form-status" data-form-status="update"></p>
-        </form>
-
-        <form id="deleteForm" class="form">
-          <h3>Delete</h3>
-          <label>
-            <span>Key column</span>
-            <input name="keyColumn" placeholder="IssueId" />
-          </label>
-          <label>
-            <span>Key value</span>
-            <input name="keyValue" placeholder="123" />
-          </label>
-          <button type="submit">Delete Row</button>
-          <p class="form-status" data-form-status="delete"></p>
-        </form>
-      </section>
-    </main>
-
-    <script src="reporting.js"></script>
+    <div id="root"></div>
+    <script type="module" src="app.js"></script>
   </body>
 </html>

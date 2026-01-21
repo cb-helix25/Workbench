@@ -1,4 +1,4 @@
-name: Build and deploy Node.js app to Azure Web App - workbench-v1
+name: Build and deploy Node.js app to Azure Web App - workbenchv1
 
 on:
   push:
@@ -67,6 +67,6 @@ jobs:
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
         with:
-          app-name: 'workbench-v1'
+          app-name: 'workbenchv1'
           slot-name: 'Production'
           package: .

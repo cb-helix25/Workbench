@@ -15,7 +15,7 @@ app.locals.secretClient = secretClient;
 app.use(express.json({ limit: "1mb" }));
 app.use("/api/reporting", reportingRouter);
 
-const uiPath = path.join(__dirname, "../pages");
+const uiPath = path.join(__dirname, "../dist");
 app.use(express.static(uiPath));
 
 app.get("*", (_req, res) => {

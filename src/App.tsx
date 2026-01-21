@@ -1,6 +1,10 @@
 import { ReactNode } from "react";
 import { BrowserRouter, Link, NavLink, Route, Routes } from "react-router-dom";
-import ReportingPage from "./pages/Reporting";
+import {
+  HelixCoreDataPage,
+  HelixProjectDataPage,
+  InstructionsPage
+} from "./pages/Reporting";
 
 interface PageHeaderProps {
   eyebrow?: string;
@@ -25,22 +29,20 @@ const Home = () => (
     <PageHeader
       eyebrow="Welcome"
       title="Helix Reporting Hub"
-      description="Choose a destination below to access helix data and reporting tools. The helix-project-data workspace is available now, with more sections coming soon."
+      description="Choose a destination below."
     />
     <section className="panel home-panel">
-      <h2>Jump to a workspace</h2>
       <div className="nav-grid">
         <Link className="nav-button" to="/helix-project-data">
           helix-project-data
         </Link>
-        <button className="nav-button" type="button" disabled>
+        <Link className="nav-button" to="/helix-core-data">
           helix-core-data
-        </button>
-        <button className="nav-button" type="button" disabled>
+        </Link>
+        <Link className="nav-button" to="/instructions">
           instructions
-        </button>
+        </Link>
       </div>
-      <p className="hint">More destinations will light up soon.</p>
     </section>
   </main>
 );
@@ -70,28 +72,14 @@ const App = () => (
     <nav className="sr-only">
       <NavLink to="/">Home</NavLink>
       <NavLink to="/helix-project-data">Helix Project Data</NavLink>
+      <NavLink to="/helix-core-data">Helix Core Data</NavLink>
+      <NavLink to="/instructions">Instructions</NavLink>
     </nav>
     <Routes>
       <Route path="/" element={<Home />} />
-      <Route path="/helix-project-data" element={<ReportingPage />} />
-      <Route
-        path="/helix-core-data"
-        element={
-          <PlaceholderPage
-            title="Helix Core Data"
-            description="This section is reserved for future core datasets and reporting tools."
-          />
-        }
-      />
-      <Route
-        path="/instructions"
-        element={
-          <PlaceholderPage
-            title="Instructions"
-            description="Guides and onboarding steps will be added here soon."
-          />
-        }
-      />
+      <Route path="/helix-project-data" element={<HelixProjectDataPage />} />
+      <Route path="/helix-core-data" element={<HelixCoreDataPage />} />
+      <Route path="/instructions" element={<InstructionsPage />} />
       <Route path="*" element={<Home />} />
     </Routes>
   </BrowserRouter>

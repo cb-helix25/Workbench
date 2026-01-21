@@ -26,7 +26,7 @@ const parseJsonField = (value: FormDataEntryValue | null, fallbackMessage: strin
   return JSON.parse(value);
 };
 
-const initReportingHub = () => {
+const initReportingHub = (apiBase: string) => {
   const tableSelect = document.getElementById("tableSelect") as HTMLSelectElement | null;
   const schemaList = document.getElementById("schemaList") as HTMLUListElement | null;
   const dataTable = document.getElementById("dataTable") as HTMLTableElement | null;
@@ -131,7 +131,7 @@ const initReportingHub = () => {
 
   const loadTables = async () => {
     setStatus("Loading tables…");
-    const data = await fetchJson<{ tables: TableEntry[] }>("/api/reporting/tables");
+    const data = await fetchJson<{ tables: TableEntry[] }>(`${apiBase}/tables`);
     tableSelect.innerHTML = "";
 
     data.tables.forEach((entry) => {
@@ -164,10 +164,8 @@ const initReportingHub = () => {
     setStatus(`Loading ${schema}.${table}…`);
 
     const [schemaResponse, rowResponse] = await Promise.all([
-      fetchJson<{ columns: ColumnEntry[] }>(
-        `/api/reporting/tables/${schema}/${table}/columns`
-      ),
-      fetchJson<{ rows: JsonRecord[] }>(`/api/reporting/tables/${schema}/${table}/rows`)
+      fetchJson<{ columns: ColumnEntry[] }>(`${apiBase}/tables/${schema}/${table}/columns`),
+      fetchJson<{ rows: JsonRecord[] }>(`${apiBase}/tables/${schema}/${table}/rows`)
     ]);
 
     renderSchema(schemaResponse.columns);
@@ -197,11 +195,14 @@ const initReportingHub = () => {
         new FormData(insertForm).get("values"),
         "Insert values missing."
       );
-      await fetchJson(`/api/reporting/tables/${currentSelection.schema}/${currentSelection.table}/insert`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ values })
-      });
+      await fetchJson(
+        `${apiBase}/tables/${currentSelection.schema}/${currentSelection.table}/insert`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ values })
+        }
+      );
       setFormStatus("insert", "Insert successful.", false);
       await loadSchemaAndRows();
     } catch (error) {
@@ -219,11 +220,14 @@ const initReportingHub = () => {
       const keyValue = formData.get("keyValue");
       const updates = parseJsonField(formData.get("updates"), "Update values missing.");
 
-      await fetchJson(`/api/reporting/tables/${currentSelection.schema}/${currentSelection.table}/update`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keyColumn, keyValue, updates })
-      });
+      await fetchJson(
+        `${apiBase}/tables/${currentSelection.schema}/${currentSelection.table}/update`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keyColumn, keyValue, updates })
+        }
+      );
       setFormStatus("update", "Update successful.", false);
       await loadSchemaAndRows();
     } catch (error) {
@@ -240,11 +244,14 @@ const initReportingHub = () => {
       const keyColumn = formData.get("keyColumn");
       const keyValue = formData.get("keyValue");
 
-      await fetchJson(`/api/reporting/tables/${currentSelection.schema}/${currentSelection.table}/delete`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keyColumn, keyValue })
-      });
+      await fetchJson(
+        `${apiBase}/tables/${currentSelection.schema}/${currentSelection.table}/delete`,
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keyColumn, keyValue })
+        }
+      );
       setFormStatus("delete", "Delete successful.", false);
       await loadSchemaAndRows();
     } catch (error) {
@@ -276,19 +283,22 @@ const initReportingHub = () => {
   };
 };
 
-const ReportingPage = () => {
-  useEffect(() => initReportingHub(), []);
+interface ReportingPageProps {
+  title: string;
+  description: string;
+  apiBase: string;
+}
+
+const ReportingPage = ({ title, description, apiBase }: ReportingPageProps) => {
+  useEffect(() => initReportingHub(apiBase), [apiBase]);
 
   return (
     <div>
       <header className="page-header">
         <div>
           <p className="eyebrow">Helix Reporting Hub</p>
-          <h1>Helix Project Data</h1>
-          <p>
-            A clean, standalone reporting hub that surfaces schema metadata and lets you view or edit
-            live database rows in one place.
-          </p>
+          <h1>{title}</h1>
+          <p>{description}</p>
           <Link className="back-link" to="/">
             Back to home
           </Link>
@@ -336,11 +346,7 @@ const ReportingPage = () => {
             <h3>Insert</h3>
             <label>
               <span>Values (JSON)</span>
-              <textarea
-                name="values"
-                rows={4}
-                placeholder='{"title":"New issue","priority":"High"}'
-              ></textarea>
+              <textarea name="values" rows={4} placeholder='{"title":"New item","priority":"Medium"}'></textarea>
             </label>
             <button type="submit">Insert Row</button>
             <p className="form-status" data-form-status="insert"></p>
@@ -382,5 +388,32 @@ const ReportingPage = () => {
     </div>
   );
 };
+
+const reportingDescription =
+  "A clean, standalone reporting hub that surfaces schema metadata and lets you view or edit live database rows in one place.";
+
+export const HelixProjectDataPage = () => (
+  <ReportingPage
+    title="Helix Project Data"
+    description={reportingDescription}
+    apiBase="/api/reporting/helix-project-data"
+  />
+);
+
+export const HelixCoreDataPage = () => (
+  <ReportingPage
+    title="Helix Core Data"
+    description={reportingDescription}
+    apiBase="/api/reporting/helix-core-data"
+  />
+);
+
+export const InstructionsPage = () => (
+  <ReportingPage
+    title="Instructions"
+    description={reportingDescription}
+    apiBase="/api/reporting/instructions"
+  />
+);
 
 export default ReportingPage;

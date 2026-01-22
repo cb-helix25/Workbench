@@ -33,6 +33,7 @@ jobs:
           mkdir -p artifact
           cp package.json artifact/
           cp package-lock.json artifact/
+          cp web.config artifact/
           cp -r server artifact/
           cp -r dist artifact/
           cp -r node_modules artifact/

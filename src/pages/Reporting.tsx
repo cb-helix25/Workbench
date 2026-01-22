@@ -33,10 +33,14 @@ const initReportingHub = (apiBase: string) => {
   const statusMessage = document.getElementById("statusMessage") as HTMLDivElement | null;
   const rowCount = document.getElementById("rowCount") as HTMLSpanElement | null;
   const refreshButton = document.getElementById("refreshButton") as HTMLButtonElement | null;
+  const insertButton = document.getElementById("insertButton") as HTMLButtonElement | null;
 
   const insertForm = document.getElementById("insertForm") as HTMLFormElement | null;
   const updateForm = document.getElementById("updateForm") as HTMLFormElement | null;
   const deleteForm = document.getElementById("deleteForm") as HTMLFormElement | null;
+  const insertDialog = document.getElementById("insertDialog") as HTMLDialogElement | null;
+  const updateDialog = document.getElementById("updateDialog") as HTMLDialogElement | null;
+  const deleteDialog = document.getElementById("deleteDialog") as HTMLDialogElement | null;
 
   if (
     !tableSelect ||
@@ -45,9 +49,13 @@ const initReportingHub = (apiBase: string) => {
     !statusMessage ||
     !rowCount ||
     !refreshButton ||
+    !insertButton ||
     !insertForm ||
     !updateForm ||
-    !deleteForm
+    !deleteForm ||
+    !insertDialog ||
+    !updateDialog ||
+    !deleteDialog
   ) {
     return () => undefined;
   }
@@ -113,6 +121,9 @@ const initReportingHub = (apiBase: string) => {
       th.textContent = column;
       headerRow.appendChild(th);
     });
+    const actionHeader = document.createElement("th");
+    actionHeader.textContent = "Actions";
+    headerRow.appendChild(actionHeader);
     head.appendChild(headerRow);
 
     rows.forEach((row) => {
@@ -123,6 +134,38 @@ const initReportingHub = (apiBase: string) => {
         td.textContent = value === null || value === undefined ? "" : String(value);
         tr.appendChild(td);
       });
+      const actionCell = document.createElement("td");
+      actionCell.className = "row-actions";
+      const updateButton = document.createElement("button");
+      updateButton.type = "button";
+      updateButton.textContent = "Update";
+      updateButton.className = "ghost-button";
+      updateButton.addEventListener("click", () => {
+        const keyColumn = columns[0];
+        const keyValue = row[keyColumn];
+        const keyColumnField = updateForm.querySelector("input[name='keyColumn']") as HTMLInputElement | null;
+        const keyValueField = updateForm.querySelector("input[name='keyValue']") as HTMLInputElement | null;
+        if (keyColumnField) keyColumnField.value = keyColumn ?? "";
+        if (keyValueField) keyValueField.value = keyValue === null || keyValue === undefined ? "" : String(keyValue);
+        setFormStatus("update", "", false);
+        updateDialog.showModal();
+      });
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.textContent = "Delete";
+      deleteButton.className = "ghost-button danger";
+      deleteButton.addEventListener("click", () => {
+        const keyColumn = columns[0];
+        const keyValue = row[keyColumn];
+        const keyColumnField = deleteForm.querySelector("input[name='keyColumn']") as HTMLInputElement | null;
+        const keyValueField = deleteForm.querySelector("input[name='keyValue']") as HTMLInputElement | null;
+        if (keyColumnField) keyColumnField.value = keyColumn ?? "";
+        if (keyValueField) keyValueField.value = keyValue === null || keyValue === undefined ? "" : String(keyValue);
+        setFormStatus("delete", "", false);
+        deleteDialog.showModal();
+      });
+      actionCell.append(updateButton, deleteButton);
+      tr.appendChild(actionCell);
       body.appendChild(tr);
     });
 
@@ -259,11 +302,32 @@ const initReportingHub = (apiBase: string) => {
     }
   };
 
+  const handleOpenInsert = () => {
+    setFormStatus("insert", "", false);
+    insertDialog.showModal();
+  };
+
+  const handleInsertDialogClick = (event: MouseEvent) => {
+    if (event.target === insertDialog) insertDialog.close();
+  };
+
+  const handleUpdateDialogClick = (event: MouseEvent) => {
+    if (event.target === updateDialog) updateDialog.close();
+  };
+
+  const handleDeleteDialogClick = (event: MouseEvent) => {
+    if (event.target === deleteDialog) deleteDialog.close();
+  };
+
   refreshButton.addEventListener("click", handleRefresh);
   tableSelect.addEventListener("change", handleTableChange);
   insertForm.addEventListener("submit", handleInsert);
   updateForm.addEventListener("submit", handleUpdate);
   deleteForm.addEventListener("submit", handleDelete);
+  insertButton.addEventListener("click", handleOpenInsert);
+  insertDialog.addEventListener("click", handleInsertDialogClick);
+  updateDialog.addEventListener("click", handleUpdateDialogClick);
+  deleteDialog.addEventListener("click", handleDeleteDialogClick);
 
   void (async () => {
     try {
@@ -280,6 +344,10 @@ const initReportingHub = (apiBase: string) => {
     insertForm.removeEventListener("submit", handleInsert);
     updateForm.removeEventListener("submit", handleUpdate);
     deleteForm.removeEventListener("submit", handleDelete);
+    insertButton.removeEventListener("click", handleOpenInsert);
+    insertDialog.removeEventListener("click", handleInsertDialogClick);
+    updateDialog.removeEventListener("click", handleUpdateDialogClick);
+    deleteDialog.removeEventListener("click", handleDeleteDialogClick);
   };
 };
 
@@ -324,7 +392,12 @@ const ReportingPage = ({ title, description, apiBase }: ReportingPageProps) => {
         <section className="panel">
           <h2>Data Preview</h2>
           <div className="toolbar">
-            <button id="refreshButton">Refresh</button>
+            <div className="toolbar-actions">
+              <button id="refreshButton">Refresh</button>
+              <button id="insertButton" className="icon-button" type="button" aria-label="Insert row">
+                +
+              </button>
+            </div>
             <span id="rowCount"></span>
           </div>
           <div className="table-wrap">
@@ -333,56 +406,72 @@ const ReportingPage = ({ title, description, apiBase }: ReportingPageProps) => {
               <tbody></tbody>
             </table>
           </div>
-        </section>
-
-        <section className="panel">
-          <h2>Quick Edit</h2>
-          <p className="hint">
-            Use the forms below to insert, update, or delete rows. Keep payloads small and test
-            carefully.
-          </p>
-
-          <form id="insertForm" className="form">
-            <h3>Insert</h3>
-            <label>
-              <span>Values (JSON)</span>
-              <textarea name="values" rows={4} placeholder='{"title":"New item","priority":"Medium"}'></textarea>
-            </label>
-            <button type="submit">Insert Row</button>
-            <p className="form-status" data-form-status="insert"></p>
-          </form>
-
-          <form id="updateForm" className="form">
-            <h3>Update</h3>
-            <label>
-              <span>Key column</span>
-              <input name="keyColumn" placeholder="IssueId" />
-            </label>
-            <label>
-              <span>Key value</span>
-              <input name="keyValue" placeholder="123" />
-            </label>
-            <label>
-              <span>Updates (JSON)</span>
-              <textarea name="updates" rows={4} placeholder='{"priority":"Low"}'></textarea>
-            </label>
-            <button type="submit">Update Row</button>
-            <p className="form-status" data-form-status="update"></p>
-          </form>
-
-          <form id="deleteForm" className="form">
-            <h3>Delete</h3>
-            <label>
-              <span>Key column</span>
-              <input name="keyColumn" placeholder="IssueId" />
-            </label>
-            <label>
-              <span>Key value</span>
-              <input name="keyValue" placeholder="123" />
-            </label>
-            <button type="submit">Delete Row</button>
-            <p className="form-status" data-form-status="delete"></p>
-          </form>
+          <dialog id="insertDialog" className="modal">
+            <div className="modal-body">
+              <div className="modal-header">
+                <h3>Insert</h3>
+                <button type="button" className="ghost-button" onClick={(event) => (event.currentTarget.closest("dialog") as HTMLDialogElement).close()}>
+                  Close
+                </button>
+              </div>
+              <form id="insertForm" className="form">
+                <label>
+                  <span>Values (JSON)</span>
+                  <textarea name="values" rows={4} placeholder='{"title":"New item","priority":"Medium"}'></textarea>
+                </label>
+                <button type="submit">Insert Row</button>
+                <p className="form-status" data-form-status="insert"></p>
+              </form>
+            </div>
+          </dialog>
+          <dialog id="updateDialog" className="modal">
+            <div className="modal-body">
+              <div className="modal-header">
+                <h3>Update</h3>
+                <button type="button" className="ghost-button" onClick={(event) => (event.currentTarget.closest("dialog") as HTMLDialogElement).close()}>
+                  Close
+                </button>
+              </div>
+              <form id="updateForm" className="form">
+                <label>
+                  <span>Key column</span>
+                  <input name="keyColumn" placeholder="IssueId" />
+                </label>
+                <label>
+                  <span>Key value</span>
+                  <input name="keyValue" placeholder="123" />
+                </label>
+                <label>
+                  <span>Updates (JSON)</span>
+                  <textarea name="updates" rows={4} placeholder='{"priority":"Low"}'></textarea>
+                </label>
+                <button type="submit">Update Row</button>
+                <p className="form-status" data-form-status="update"></p>
+              </form>
+            </div>
+          </dialog>
+          <dialog id="deleteDialog" className="modal">
+            <div className="modal-body">
+              <div className="modal-header">
+                <h3>Delete</h3>
+                <button type="button" className="ghost-button" onClick={(event) => (event.currentTarget.closest("dialog") as HTMLDialogElement).close()}>
+                  Close
+                </button>
+              </div>
+              <form id="deleteForm" className="form">
+                <label>
+                  <span>Key column</span>
+                  <input name="keyColumn" placeholder="IssueId" />
+                </label>
+                <label>
+                  <span>Key value</span>
+                  <input name="keyValue" placeholder="123" />
+                </label>
+                <button type="submit">Delete Row</button>
+                <p className="form-status" data-form-status="delete"></p>
+              </form>
+            </div>
+          </dialog>
         </section>
       </main>
     </div>

@@ -207,6 +207,12 @@ button:hover {
   gap: 12px;
 }
 
+.toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .hint {
   margin: 0;
   color: #5b6271;
@@ -221,4 +227,10 @@ button:hover {
   margin: 0;
   font-size: 0.85rem;
   color: #2563eb;
+}
+
+.toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }

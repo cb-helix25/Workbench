@@ -34,6 +34,7 @@ const initReportingHub = (apiBase: string) => {
   const rowCount = document.getElementById("rowCount") as HTMLSpanElement | null;
   const refreshButton = document.getElementById("refreshButton") as HTMLButtonElement | null;
   const insertButton = document.getElementById("insertButton") as HTMLButtonElement | null;
+  const queryForm = document.getElementById("queryForm") as HTMLFormElement | null;
 
   const insertForm = document.getElementById("insertForm") as HTMLFormElement | null;
   const updateForm = document.getElementById("updateForm") as HTMLFormElement | null;
@@ -50,6 +51,9 @@ const initReportingHub = (apiBase: string) => {
     !rowCount ||
     !refreshButton ||
     !insertButton ||
+    !queryForm ||
+    !refreshButton ||
+    !insertButton ||
     !insertForm ||
     !updateForm ||
     !deleteForm ||
@@ -61,6 +65,10 @@ const initReportingHub = (apiBase: string) => {
   }
 
   let currentSelection: TableSelection = { schema: "dbo", table: "TeamIssues" };
+  let currentPage = 1;
+  let pageSize = 50;
+  let totalPages = 1;
+  let totalRows = 0;
 
   const setStatus = (text: string, tone: "info" | "error" = "info") => {
     statusMessage.textContent = text;
@@ -110,7 +118,8 @@ const initReportingHub = (apiBase: string) => {
     body.innerHTML = "";
 
     if (!rows.length) {
-      rowCount.textContent = "No rows returned.";
+      rowCount.textContent = "No rows found.";
+      updatePaginationControls();
       return;
     }
 
@@ -171,7 +180,7 @@ const initReportingHub = (apiBase: string) => {
       body.appendChild(tr);
     });
 
-    rowCount.textContent = `${rows.length} row(s) loaded.`;
+    updatePaginationControls();
   };
 
   const loadTables = async () => {
@@ -205,18 +214,110 @@ const initReportingHub = (apiBase: string) => {
   const loadSchemaAndRows = async () => {
     const [schema, table] = tableSelect.value.split(".");
     currentSelection = { schema, table };
+    currentPage = 1;
 
     setStatus(`Loading ${schema}.${table}…`);
 
     const [schemaResponse, rowResponse] = await Promise.all([
       fetchJson<{ columns: ColumnEntry[] }>(`${apiBase}/tables/${schema}/${table}/columns`),
-      fetchJson<{ rows: JsonRecord[] }>(`${apiBase}/tables/${schema}/${table}/rows`)
+      fetchJson<{ rows: JsonRecord[]; pagination: { page: number; pageSize: number; total: number; totalPages: number } }>(
+        `${apiBase}/tables/${schema}/${table}/rows?page=${currentPage}&pageSize=${pageSize}`
+      )
     ]);
+
+    if (rowResponse.pagination) {
+      currentPage = rowResponse.pagination.page;
+      totalPages = rowResponse.pagination.totalPages;
+      totalRows = rowResponse.pagination.total;
+    }
 
     renderSchema(schemaResponse.columns);
     renderRows(rowResponse.rows);
 
     setStatus(`Loaded ${schema}.${table}`);
+  };
+
+  const loadRows = async () => {
+    const { schema, table } = currentSelection;
+    setStatus(`Loading page ${currentPage}…`);
+
+    const rowResponse = await fetchJson<{ rows: JsonRecord[]; pagination: { page: number; pageSize: number; total: number; totalPages: number } }>(
+      `${apiBase}/tables/${schema}/${table}/rows?page=${currentPage}&pageSize=${pageSize}`
+    );
+
+    if (rowResponse.pagination) {
+      currentPage = rowResponse.pagination.page;
+      totalPages = rowResponse.pagination.totalPages;
+      totalRows = rowResponse.pagination.total;
+    }
+
+    renderRows(rowResponse.rows);
+    setStatus(`Loaded ${schema}.${table}`);
+  };
+
+  const updatePaginationControls = () => {
+    const prevButton = document.getElementById("prevButton") as HTMLButtonElement | null;
+    const nextButton = document.getElementById("nextButton") as HTMLButtonElement | null;
+    const pageInfo = document.getElementById("pageInfo") as HTMLSpanElement | null;
+
+    if (prevButton) {
+      prevButton.disabled = currentPage <= 1;
+    }
+    if (nextButton) {
+      nextButton.disabled = currentPage >= totalPages;
+    }
+    if (pageInfo) {
+      const start = totalRows === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+      const end = Math.min(currentPage * pageSize, totalRows);
+      pageInfo.textContent = `${start}-${end} of ${totalRows} rows`;
+    }
+    if (rowCount) {
+      rowCount.textContent = `Page ${currentPage} of ${totalPages}`;
+    }
+  };
+
+  const handlePrevPage = () => {
+    if (currentPage > 1) {
+      currentPage--;
+      loadRows().catch((error: Error) => setStatus(error.message, "error"));
+    }
+  };
+
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      currentPage++;
+      loadRows().catch((error: Error) => setStatus(error.message, "error"));
+    }
+  };
+
+  const handleQuery = async (event: SubmitEvent) => {
+    event.preventDefault();
+    const queryForm = event.target as HTMLFormElement;
+    const queryInput = queryForm.querySelector("textarea[name='query']") as HTMLTextAreaElement;
+    const query = queryInput?.value.trim();
+
+    if (!query) {
+      setStatus("Please enter a query.", "error");
+      return;
+    }
+
+    setStatus("Executing query…");
+
+    try {
+      const result = await fetchJson<{ rows: JsonRecord[]; rowCount: number }>(
+        `${apiBase}/tables/${currentSelection.schema}/${currentSelection.table}/query`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query })
+        }
+      );
+
+      renderRows(result.rows);
+      setStatus(`Query returned ${result.rowCount} row(s).`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Query failed.", "error");
+    }
   };
 
   const handleRefresh = () => {
@@ -321,8 +422,12 @@ const initReportingHub = (apiBase: string) => {
     if (event.target === deleteDialog) deleteDialog.close();
   };
 
+  const prevButton = document.getElementById("prevButton") as HTMLButtonElement | null;
+  const nextButton = document.getElementById("nextButton") as HTMLButtonElement | null;
+
   refreshButton.addEventListener("click", handleRefresh);
   tableSelect.addEventListener("change", handleTableChange);
+  queryForm.addEventListener("submit", handleQuery);
   insertForm.addEventListener("submit", handleInsert);
   updateForm.addEventListener("submit", handleUpdate);
   deleteForm.addEventListener("submit", handleDelete);
@@ -330,6 +435,8 @@ const initReportingHub = (apiBase: string) => {
   insertDialog.addEventListener("click", handleInsertDialogClick);
   updateDialog.addEventListener("click", handleUpdateDialogClick);
   deleteDialog.addEventListener("click", handleDeleteDialogClick);
+  if (prevButton) prevButton.addEventListener("click", handlePrevPage);
+  if (nextButton) nextButton.addEventListener("click", handleNextPage);
 
   void (async () => {
     try {
@@ -343,6 +450,7 @@ const initReportingHub = (apiBase: string) => {
   return () => {
     refreshButton.removeEventListener("click", handleRefresh);
     tableSelect.removeEventListener("change", handleTableChange);
+    queryForm.removeEventListener("submit", handleQuery);
     insertForm.removeEventListener("submit", handleInsert);
     updateForm.removeEventListener("submit", handleUpdate);
     deleteForm.removeEventListener("submit", handleDelete);
@@ -350,6 +458,8 @@ const initReportingHub = (apiBase: string) => {
     insertDialog.removeEventListener("click", handleInsertDialogClick);
     updateDialog.removeEventListener("click", handleUpdateDialogClick);
     deleteDialog.removeEventListener("click", handleDeleteDialogClick);
+    if (prevButton) prevButton.removeEventListener("click", handlePrevPage);
+    if (nextButton) nextButton.removeEventListener("click", handleNextPage);
   };
 };
 
@@ -389,6 +499,15 @@ const ReportingPage = ({ title, description, apiBase }: ReportingPageProps) => {
             <h3>Schema</h3>
             <ul id="schemaList"></ul>
           </div>
+          <div className="query-section">
+            <h3>Custom Query</h3>
+            <form id="queryForm" className="form">
+              <label>
+                <textarea name="query" rows={3} placeholder="SELECT * FROM [table] WHERE ..."></textarea>
+              </label>
+              <button type="submit">Execute Query</button>
+            </form>
+          </div>
         </section>
 
         <section className="panel" data-preview>
@@ -400,7 +519,14 @@ const ReportingPage = ({ title, description, apiBase }: ReportingPageProps) => {
                 +
               </button>
             </div>
-            <span id="rowCount"></span>
+            <div className="pagination-controls">
+              <span id="pageInfo"></span>
+              <div className="pagination-buttons">
+                <button id="prevButton" type="button">← Prev</button>
+                <span id="rowCount"></span>
+                <button id="nextButton" type="button">Next →</button>
+              </div>
+            </div>
           </div>
           <div className="table-wrap">
             <table id="dataTable">

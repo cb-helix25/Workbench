@@ -260,6 +260,26 @@ button:hover {
   font-size: 0.92rem;
 }
 
+.query-section {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid #edf0f6;
+}
+
+.query-section h3 {
+  margin: 0 0 12px;
+  font-size: 1rem;
+}
+
+.query-section .form {
+  gap: 10px;
+}
+
+.query-section textarea {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.9rem;
+}
+
 .toolbar {
   display: flex;
   align-items: center;
@@ -287,6 +307,43 @@ button:hover {
   margin: 0;
   font-size: 0.85rem;
   color: #2563eb;
+}
+
+.pagination-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.pagination-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#prevButton,
+#nextButton {
+  padding: 8px 16px;
+  font-size: 0.9rem;
+}
+
+#prevButton:disabled,
+#nextButton:disabled {
+  background: #d0d7e6;
+  color: #5b6271;
+  cursor: not-allowed;
+}
+
+#pageInfo {
+  font-size: 0.85rem;
+  color: #5b6271;
+}
+
+#rowCount {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #1f2430;
 }
 
 .toolbar-actions {

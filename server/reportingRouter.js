@@ -64,7 +64,9 @@ function createReportingRouter(workspaceKey) {
 
   router.get("/tables/:schema/:table/rows", async (req, res) => {
     const { schema, table } = req.params;
-    const limit = Math.min(Number(req.query.limit || 50), 200);
+    const page = Math.max(1, Number(req.query.page || 1));
+    const pageSize = Math.min(Number(req.query.pageSize || 50), 200);
+    const offset = (page - 1) * pageSize;
 
     try {
       assertSafeIdentifier(schema, "schema");
@@ -72,12 +74,89 @@ function createReportingRouter(workspaceKey) {
 
       const secretClient = req.app.locals.secretClient;
       const pool = await getReportingPool(workspaceKey, secretClient);
-      const query = `SELECT TOP (${limit}) * FROM [${schema}].[${table}]`;
+      
+      // Get total count
+      const countQuery = `SELECT COUNT(*) as total FROM [${schema}].[${table}]`;
+      const countResult = await pool.request().query(countQuery);
+      const total = countResult.recordset[0].total;
+      
+      // Get first column name for ordering
+      const columnsResult = await pool.request()
+        .input("schema", sql.NVarChar, schema)
+        .input("table", sql.NVarChar, table)
+        .query(
+          `SELECT TOP 1 COLUMN_NAME
+           FROM INFORMATION_SCHEMA.COLUMNS
+           WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = @table
+           ORDER BY ORDINAL_POSITION`
+        );
+      const orderColumn = columnsResult.recordset[0]?.COLUMN_NAME || "1";
+      
+      // Get paginated rows
+      const query = `
+        SELECT * FROM [${schema}].[${table}]
+        ORDER BY [${orderColumn}]
+        OFFSET ${offset} ROWS
+        FETCH NEXT ${pageSize} ROWS ONLY
+      `;
       const result = await pool.request().query(query);
-      res.json({ schema, table, rows: result.recordset });
+      
+      res.json({ 
+        schema, 
+        table, 
+        rows: result.recordset,
+        pagination: {
+          page,
+          pageSize,
+          total,
+          totalPages: Math.ceil(total / pageSize)
+        }
+      });
     } catch (error) {
       console.error("[REPORTING-HUB] Failed to load rows:", error);
       res.status(500).json({ error: "Failed to load rows." });
+    }
+  });
+
+  router.post("/tables/:schema/:table/query", async (req, res) => {
+    const { schema, table } = req.params;
+    const { query } = req.body || {};
+
+    try {
+      assertSafeIdentifier(schema, "schema");
+      assertSafeIdentifier(table, "table");
+
+      if (!query || typeof query !== "string") {
+        return res.status(400).json({ error: "Query string is required." });
+      }
+
+      // Only allow SELECT statements
+      const trimmedQuery = query.trim().toLowerCase();
+      if (!trimmedQuery.startsWith("select")) {
+        return res.status(400).json({ error: "Only SELECT queries are allowed." });
+      }
+
+      // Prevent potentially dangerous keywords
+      const dangerousKeywords = ["drop", "delete", "insert", "update", "alter", "create", "truncate", "exec", "execute"];
+      if (dangerousKeywords.some(keyword => trimmedQuery.includes(keyword))) {
+        return res.status(400).json({ error: "Query contains forbidden keywords." });
+      }
+
+      const secretClient = req.app.locals.secretClient;
+      const pool = await getReportingPool(workspaceKey, secretClient);
+      
+      // Execute the query with a reasonable limit
+      const result = await pool.request().query(query);
+      
+      res.json({ 
+        schema, 
+        table, 
+        rows: result.recordset,
+        rowCount: result.recordset.length
+      });
+    } catch (error) {
+      console.error("[REPORTING-HUB] Query execution failed:", error);
+      res.status(500).json({ error: error.message || "Query execution failed." });
     }
   });
 

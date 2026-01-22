@@ -70,19 +70,23 @@ body {
 }
 
 .layout {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 20px;
 }
 
 .panel {
   background: #ffffff;
-  padding: 20px;
+  padding: 24px;
   border-radius: 16px;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.data-preview {
+  gap: 20px;
 }
 
 .home-grid {
@@ -168,24 +172,80 @@ button:hover {
 
 .table-wrap {
   overflow-x: auto;
+  border: 1px solid #edf0f6;
+  border-radius: 14px;
 }
 
 #dataTable {
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   width: 100%;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
 }
 
 #dataTable th,
 #dataTable td {
   border-bottom: 1px solid #edf0f6;
-  padding: 10px;
+  padding: 14px 16px;
   text-align: left;
 }
 
 #dataTable th {
   background: #f3f5fa;
   font-weight: 600;
+ color: #364152;
+}
+
+#dataTable tr:nth-child(even) td {
+  background: #fafbfe;
+}
+
+#dataTable tr:last-child td {
+  border-bottom: none;
+}
+
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.row-action-button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #1d4ed8;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.row-action-button:hover {
+  background: #dbe4ff;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.2);
+}
+
+.row-action-button:active {
+  transform: scale(0.94);
+  background: #c7d2fe;
+}
+
+.row-action-button.delete {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.row-action-button.delete:hover {
+  background: #fecaca;
+  box-shadow: 0 6px 16px rgba(185, 28, 28, 0.2);
+}
+
+.row-action-button.delete:active {
+  background: #fca5a5;
 }
 
 .schema ul {

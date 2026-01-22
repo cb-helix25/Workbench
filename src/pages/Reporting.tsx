@@ -138,8 +138,9 @@ const initReportingHub = (apiBase: string) => {
       actionCell.className = "row-actions";
       const updateButton = document.createElement("button");
       updateButton.type = "button";
-      updateButton.textContent = "Update";
-      updateButton.className = "ghost-button";
+      updateButton.textContent = "U";
+      updateButton.className = "row-action-button update";
+      updateButton.setAttribute("aria-label", "Update row");
       updateButton.addEventListener("click", () => {
         const keyColumn = columns[0];
         const keyValue = row[keyColumn];
@@ -152,8 +153,9 @@ const initReportingHub = (apiBase: string) => {
       });
       const deleteButton = document.createElement("button");
       deleteButton.type = "button";
-      deleteButton.textContent = "Delete";
-      deleteButton.className = "ghost-button danger";
+      deleteButton.textContent = "D";
+      deleteButton.className = "row-action-button delete";
+      deleteButton.setAttribute("aria-label", "Delete row");
       deleteButton.addEventListener("click", () => {
         const keyColumn = columns[0];
         const keyValue = row[keyColumn];
@@ -377,7 +379,7 @@ const ReportingPage = ({ title, description, apiBase }: ReportingPageProps) => {
       </header>
 
       <main className="layout">
-        <section className="panel">
+        <section className="panel" database-explorer>
           <h2>Database Explorer</h2>
           <label className="field">
             <span>Table</span>
@@ -389,7 +391,7 @@ const ReportingPage = ({ title, description, apiBase }: ReportingPageProps) => {
           </div>
         </section>
 
-        <section className="panel">
+        <section className="panel" data-preview>
           <h2>Data Preview</h2>
           <div className="toolbar">
             <div className="toolbar-actions">

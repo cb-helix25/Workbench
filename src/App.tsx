@@ -1,5 +1,6 @@
 import { ReactNode } from "react";
 import { BrowserRouter, Link, NavLink, Route, Routes } from "react-router-dom";
+import ACRemediation from "./pages/ACRemediation";
 import {
   HelixCoreDataPage,
   HelixProjectDataPage,
@@ -42,6 +43,9 @@ const Home = () => (
         <Link className="nav-button" to="/instructions">
           instructions
         </Link>
+        <Link className="nav-button" to="/ac-remediation">
+          ac-remediation
+        </Link>
       </div>
     </section>
   </main>
@@ -74,12 +78,14 @@ const App = () => (
       <NavLink to="/helix-project-data">Helix Project Data</NavLink>
       <NavLink to="/helix-core-data">Helix Core Data</NavLink>
       <NavLink to="/instructions">Instructions</NavLink>
+      <NavLink to="/ac-remediation">AC Remediation</NavLink>
     </nav>
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/helix-project-data" element={<HelixProjectDataPage />} />
       <Route path="/helix-core-data" element={<HelixCoreDataPage />} />
       <Route path="/instructions" element={<InstructionsPage />} />
+      <Route path="/ac-remediation" element={<ACRemediation />} />
       <Route path="*" element={<Home />} />
     </Routes>
   </BrowserRouter>

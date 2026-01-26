@@ -1,0 +1,475 @@
+const express = require("express");
+const sql = require("mssql");
+const { getReportingPool } = require("./db");
+
+const DEFAULT_WORKSPACE = "helix-core-data";
+const CONTACT_TABLE = "dbo.enquiries";
+
+const normalizeHeader = (value) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const splitCsvLine = (line) => {
+  return line
+    .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
+    .map((cell) => cell.trim().replace(/^"|"$/g, ""));
+};
+
+const findHeaderIndex = (headers, identifierType) => {
+  const normalized = headers.map((header) => normalizeHeader(header));
+  if (identifierType === "email") {
+    return normalized.findIndex((header) => header.includes("email"));
+  }
+  return normalized.findIndex((header) => header.includes("accontactid") || header.includes("contactid"));
+};
+
+const parseRawInput = (rawInput, identifierType) => {
+  if (typeof rawInput !== "string") {
+    return [];
+  }
+
+  const trimmed = rawInput.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  const lines = trimmed.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  if (lines.length === 0) {
+    return [];
+  }
+
+  const hasComma = lines[0].includes(",");
+
+  let values = [];
+
+  if (hasComma) {
+    const headers = splitCsvLine(lines[0]);
+    const headerIndex = findHeaderIndex(headers, identifierType);
+
+    if (headerIndex === -1) {
+      throw new Error("CSV header is missing the selected identifier column.");
+    }
+
+    values = lines
+      .slice(1)
+      .map((line) => splitCsvLine(line)[headerIndex])
+      .filter(Boolean);
+  } else {
+    values = lines;
+  }
+
+  const deduped = new Set();
+  values.forEach((value) => {
+    const trimmedValue = String(value).trim();
+    if (trimmedValue) {
+      deduped.add(trimmedValue);
+    }
+  });
+
+  return Array.from(deduped);
+};
+
+const normalizeTouchpointDate = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error("Invalid touchpoint date value.");
+  }
+
+  return parsed.toISOString();
+};
+
+const buildApiUrl = (baseUrl, path) => {
+  const trimmed = baseUrl.replace(/\/$/, "");
+  return `${trimmed}${path}`;
+};
+
+const fetchJson = async (url, options) => {
+  const response = await fetch(url, options);
+  const payload = await response.json();
+  if (!response.ok) {
+    const message = payload?.message || payload?.error || `Request failed with status ${response.status}`;
+    throw new Error(message);
+  }
+  return payload;
+};
+
+const fetchAcContactIdByEmail = async (baseUrl, apiKey, email) => {
+  const url = buildApiUrl(baseUrl, `/contacts?email=${encodeURIComponent(email)}`);
+  const payload = await fetchJson(url, {
+    method: "GET",
+    headers: {
+      "Api-Token": apiKey,
+      Accept: "application/json"
+    }
+  });
+
+  const contact = payload?.contacts?.[0];
+  return contact?.id || null;
+};
+
+const updateTouchpointField = async (baseUrl, apiKey, fieldId, contactId, value) => {
+  const url = buildApiUrl(baseUrl, "/fieldValues");
+  await fetchJson(url, {
+    method: "POST",
+    headers: {
+      "Api-Token": apiKey,
+      Accept: "application/json",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      fieldValue: {
+        contact: contactId,
+        field: fieldId,
+        value
+      }
+    })
+  });
+};
+
+// Resolve an ActiveCampaign custom field ID using its personalization tag (e.g. "%TOUCHPOINT_DATE%").
+// Falls back to matching by title if perstag/tag isn't present.
+const resolveFieldIdByPerstag = async (baseUrl, apiKey, perstag) => {
+  const url = buildApiUrl(baseUrl, "/fields");
+  const payload = await fetchJson(url, {
+    method: "GET",
+    headers: {
+      "Api-Token": apiKey,
+      Accept: "application/json"
+    }
+  });
+
+  const fields = payload?.fields || [];
+  const normalized = String(perstag || "").replace(/^%|%$/g, "").toUpperCase();
+
+  const matchByPerstag = fields.find((f) => {
+    const tag = String(f?.perstag || f?.tag || "").replace(/^%|%$/g, "").toUpperCase();
+    return tag && tag === normalized;
+  });
+
+  if (matchByPerstag?.id) {
+    return matchByPerstag.id;
+  }
+
+  const matchByTitle = fields.find((f) => String(f?.title || "").toUpperCase() === normalized);
+  return matchByTitle?.id || null;
+};
+
+const fetchTouchpointDate = async (pool, identifierType, identifier, resolvedContactId) => {
+  if (identifierType === "email") {
+    const result = await pool
+      .request()
+      .input("email", sql.NVarChar, identifier)
+      .query(`SELECT TOP 1 ID, touchpoint_date FROM ${CONTACT_TABLE} WHERE email = @email`);
+
+    if (result.recordset[0]) {
+      return result.recordset[0];
+    }
+
+    if (resolvedContactId) {
+      const fallback = await pool
+        .request()
+        .input("ac_contact_id", sql.NVarChar, resolvedContactId)
+        .query(`SELECT TOP 1 ID, touchpoint_date FROM ${CONTACT_TABLE} WHERE ID = @ac_contact_id`);
+      return fallback.recordset[0] || null;
+    }
+
+    return null;
+  }
+
+  const result = await pool
+    .request()
+    .input("ac_contact_id", sql.NVarChar, identifier)
+    .query(`SELECT TOP 1 ID, touchpoint_date FROM ${CONTACT_TABLE} WHERE ID = @ac_contact_id`);
+  return result.recordset[0] || null;
+};
+
+function createAcRemediationRouter() {
+  const router = express.Router();
+
+  router.post("/test", async (req, res) => {
+    const { identifierType, rawInput } = req.body || {};
+
+    if (identifierType !== "email" && identifierType !== "ac_contact_id") {
+      return res.status(400).json({ error: "identifierType must be 'email' or 'ac_contact_id'." });
+    }
+
+    let identifiers;
+    try {
+      identifiers = parseRawInput(rawInput, identifierType);
+    } catch (error) {
+      return res.status(400).json({ error: error.message || "Failed to parse input." });
+    }
+
+    const secretClient = req.app.locals.secretClient;
+    
+    if (!secretClient) {
+      return res.status(500).json({ error: "SecretClient is not available." });
+    }
+
+    let baseUrl, apiKey;
+    try {
+      console.log("[AC-REMEDIATION-TEST] Fetching secrets from Key Vault...");
+      const baseUrlSecret = await secretClient.getSecret("ac-base-url");
+      const apiKeySecret = await secretClient.getSecret("ac-api-token");
+      
+      baseUrl = baseUrlSecret?.value;
+      apiKey = apiKeySecret?.value;
+      
+      console.log("[AC-REMEDIATION-TEST] Base URL retrieved:", baseUrl ? "✓" : "✗");
+      console.log("[AC-REMEDIATION-TEST] API Key retrieved:", apiKey ? "✓" : "✗");
+      
+      if (!baseUrl || !apiKey) {
+        return res.status(500).json({ 
+          error: "Failed to retrieve ActiveCampaign secrets from Key Vault.",
+          details: `baseUrl: ${!!baseUrl}, apiKey: ${!!apiKey}`,
+          acConnectionTest: "failed"
+        });
+      }
+    } catch (error) {
+      console.error("[AC-REMEDIATION-TEST] Key Vault error:", error);
+      return res.status(500).json({ 
+        error: "Failed to fetch ActiveCampaign secrets from Key Vault.",
+        details: error.message,
+        acConnectionTest: "failed"
+      });
+    }
+
+    // Test ActiveCampaign connection by fetching account info
+    let acConnectionTest = "failed";
+    let acConnectionError = null;
+    try {
+      const testUrl = buildApiUrl(baseUrl, "/contacts?limit=1");
+      console.log("[AC-REMEDIATION-TEST] Testing AC connection to:", testUrl);
+      console.log("[AC-REMEDIATION-TEST] Using API key (first 10 chars):", apiKey.substring(0, 10) + "...");
+      
+      // Check if fetch is available
+      if (typeof fetch === 'undefined') {
+        throw new Error("fetch is not available - may need to install node-fetch");
+      }
+      
+      await fetchJson(testUrl, {
+        method: "GET",
+        headers: {
+          "Api-Token": apiKey,
+          Accept: "application/json"
+        }
+      });
+      acConnectionTest = "success";
+      console.log("[AC-REMEDIATION-TEST] AC connection successful!");
+    } catch (error) {
+      acConnectionError = error.message;
+      console.error("[AC-REMEDIATION-TEST] AC connection failed:", error);
+      console.error("[AC-REMEDIATION-TEST] Error stack:", error.stack);
+    }
+
+    // If we can't connect to AC, return the error but with 200 status
+    if (acConnectionTest === "failed") {
+      return res.status(200).json({
+        acConnectionTest: "failed",
+        error: acConnectionError || "Failed to connect to ActiveCampaign API.",
+        parsedCount: identifiers.length,
+        identifierType,
+        sampleResults: [],
+        message: `Parsed ${identifiers.length} identifier(s) but could not connect to ActiveCampaign.`
+      });
+    }
+
+    // Test a sample of identifiers
+    const sampleSize = Math.min(5, identifiers.length);
+    const sampleIdentifiers = identifiers.slice(0, sampleSize);
+    const sampleResults = [];
+
+    for (const identifier of sampleIdentifiers) {
+      const result = {
+        identifier,
+        found_in_ac: false,
+        ac_contact_id: null
+      };
+
+      try {
+        if (identifierType === "email") {
+          const contactId = await fetchAcContactIdByEmail(baseUrl, apiKey, identifier);
+          result.found_in_ac = !!contactId;
+          result.ac_contact_id = contactId;
+        } else {
+          // For ac_contact_id, verify it exists
+          const url = buildApiUrl(baseUrl, `/contacts/${identifier}`);
+          const payload = await fetchJson(url, {
+            method: "GET",
+            headers: {
+              "Api-Token": apiKey,
+              Accept: "application/json"
+            }
+          });
+          result.found_in_ac = !!payload?.contact;
+          result.ac_contact_id = payload?.contact?.id || null;
+        }
+      } catch (error) {
+        result.found_in_ac = false;
+      }
+
+      sampleResults.push(result);
+    }
+
+    res.json({
+      acConnectionTest,
+      parsedCount: identifiers.length,
+      identifierType,
+      sampleResults,
+      message: `Successfully parsed ${identifiers.length} identifier(s). Tested ${sampleSize} sample(s).`
+    });
+  });
+
+  router.post("/run", async (req, res) => {
+    const { identifierType, rawInput } = req.body || {};
+
+    if (identifierType !== "email" && identifierType !== "ac_contact_id") {
+      return res.status(400).json({ error: "identifierType must be 'email' or 'ac_contact_id'." });
+    }
+
+    let identifiers;
+    try {
+      identifiers = parseRawInput(rawInput, identifierType);
+    } catch (error) {
+      return res.status(400).json({ error: error.message || "Failed to parse input." });
+    }
+
+    let fieldId = process.env.TOUCHPOINT_DATE_FIELD_ID;
+
+    const secretClient = req.app.locals.secretClient;
+    
+    if (!secretClient) {
+      return res.status(500).json({ error: "SecretClient is not available." });
+    }
+
+    let baseUrl, apiKey;
+    try {
+      console.log("[AC-REMEDIATION-RUN] Fetching secrets from Key Vault...");
+      const baseUrlSecret = await secretClient.getSecret("ac-base-url");
+      const apiKeySecret = await secretClient.getSecret("ac-api-token");
+      
+      baseUrl = baseUrlSecret?.value;
+      apiKey = apiKeySecret?.value;
+      
+      console.log("[AC-REMEDIATION-RUN] Base URL retrieved:", baseUrl ? "✓" : "✗");
+      console.log("[AC-REMEDIATION-RUN] API Key retrieved:", apiKey ? "✓" : "✗");
+      
+      if (!baseUrl || !apiKey) {
+        return res.status(500).json({ error: "Failed to retrieve ActiveCampaign secrets from Key Vault." });
+      }
+    } catch (error) {
+      console.error("[AC-REMEDIATION-RUN] Key Vault error:", error);
+      return res.status(500).json({ 
+        error: "Failed to fetch ActiveCampaign secrets from Key Vault.",
+        details: error.message 
+      });
+    }
+
+    // If field ID wasn't provided via env, try resolving it via personalization tag.
+    if (!fieldId) {
+      try {
+        const perstag = (process.env.TOUCHPOINT_DATE_TAG || "%TOUCHPOINT_DATE%").replace(/^%|%$/g, "");
+        console.log("[AC-REMEDIATION-RUN] Resolving field ID from perstag:", perstag);
+        fieldId = await resolveFieldIdByPerstag(baseUrl, apiKey, perstag);
+      } catch (err) {
+        console.error("[AC-REMEDIATION-RUN] Failed to resolve field ID:", err);
+      }
+      if (!fieldId) {
+        return res.status(500).json({
+          error: "Could not resolve touchpoint field ID from ActiveCampaign.",
+          details: {
+            triedTag: process.env.TOUCHPOINT_DATE_TAG || "%TOUCHPOINT_DATE%"
+          }
+        });
+      }
+      console.log("[AC-REMEDIATION-RUN] Resolved field ID:", fieldId);
+    }
+    // Use the shared SQL helper to fetch the touchpoint date from the reporting database.
+    console.log("[AC-REMEDIATION-RUN] Connecting to SQL database...");
+    const pool = await getReportingPool(DEFAULT_WORKSPACE, secretClient);
+    console.log("[AC-REMEDIATION-RUN] SQL connection established. Processing", identifiers.length, "identifiers...");
+
+    const results = [];
+
+    for (const identifier of identifiers) {
+      const result = {
+        identifier,
+        resolved_ac_contact_id: null,
+        sql_touchpoint_date: null,
+        status: "pending",
+        error: null
+      };
+
+      try {
+        // Resolve the ActiveCampaign contact ID first (or use it directly if supplied).
+        const resolvedContactId =
+          identifierType === "ac_contact_id"
+            ? identifier
+            : await fetchAcContactIdByEmail(baseUrl, apiKey, identifier);
+
+        if (!resolvedContactId) {
+          result.status = "skipped";
+          result.error = "ActiveCampaign contact not found.";
+          results.push(result);
+          continue;
+        }
+
+        result.resolved_ac_contact_id = resolvedContactId;
+
+        // Pull the SQL touchpoint date for the contact.
+        const sqlRecord = await fetchTouchpointDate(
+          pool,
+          identifierType,
+          identifier,
+          resolvedContactId
+        );
+
+        if (!sqlRecord || !sqlRecord.touchpoint_date) {
+          result.status = "skipped";
+          result.error = "Touchpoint date not found in SQL.";
+          results.push(result);
+          continue;
+        }
+
+        // Normalize the date to an ISO-8601 UTC string before sending to ActiveCampaign.
+        const normalizedDate = normalizeTouchpointDate(sqlRecord.touchpoint_date);
+        if (!normalizedDate) {
+          result.status = "skipped";
+          result.error = "Touchpoint date is empty.";
+          results.push(result);
+          continue;
+        }
+
+        // Update the ActiveCampaign custom field with the touchpoint date.
+        await updateTouchpointField(baseUrl, apiKey, fieldId, resolvedContactId, normalizedDate);
+
+        result.sql_touchpoint_date = normalizedDate;
+        result.status = "success";
+        results.push(result);
+      } catch (error) {
+        result.status = "failed";
+        result.error = error.message || "Unknown error.";
+        results.push(result);
+        console.error("[AC-REMEDIATION] Failed to sync contact", {
+          identifier,
+          identifierType,
+          error
+        });
+      }
+    }
+
+    res.json({ results });
+  });
+
+  return router;
+}
+
+module.exports = {
+  createAcRemediationRouter
+};

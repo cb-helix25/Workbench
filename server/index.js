@@ -3,6 +3,7 @@ const express = require("express");
 const { DefaultAzureCredential } = require("@azure/identity");
 const { SecretClient } = require("@azure/keyvault-secrets");
 const { createReportingRouter } = require("./reportingRouter");
+const { createAcRemediationRouter } = require("./acRemediationRouter");
 
 const app = express();
 
@@ -17,6 +18,7 @@ app.use("/api/reporting/helix-project-data", createReportingRouter("helix-projec
 app.use("/api/reporting/helix-core-data", createReportingRouter("helix-core-data"));
 app.use("/api/reporting/instructions", createReportingRouter("instructions"));
 app.use("/api/reporting", createReportingRouter("helix-project-data"));
+app.use("/api/ac-remediation", createAcRemediationRouter());
 
 const uiPath = path.join(__dirname, "../dist");
 app.use(express.static(uiPath));

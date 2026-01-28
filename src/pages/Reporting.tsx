@@ -35,10 +35,11 @@ const initReportingHub = (apiBase: string) => {
   const refreshButton = document.getElementById("refreshButton") as HTMLButtonElement | null;
   const insertButton = document.getElementById("insertButton") as HTMLButtonElement | null;
   const queryForm = document.getElementById("queryForm") as HTMLFormElement | null;
-  const queryPasscodeInput = document.getElementById("queryPasscode") as HTMLInputElement | null;
-  const queryUnlockButton = document.getElementById("unlockQuery") as HTMLButtonElement | null;
-  const queryPasscodeStatus = document.getElementById("queryPasscodeStatus") as HTMLParagraphElement | null;
-  const queryGuard = document.getElementById("queryGuard") as HTMLDivElement | null;
+  const pageGuard = document.getElementById("pageGuard") as HTMLDivElement | null;
+  const pagePasscodeInput = document.getElementById("pagePasscode") as HTMLInputElement | null;
+  const pageUnlockButton = document.getElementById("unlockPage") as HTMLButtonElement | null;
+  const pagePasscodeStatus = document.getElementById("pagePasscodeStatus") as HTMLParagraphElement | null;
+  const reportingContent = document.getElementById("reportingContent") as HTMLDivElement | null;
 
   const insertForm = document.getElementById("insertForm") as HTMLFormElement | null;
   const updateForm = document.getElementById("updateForm") as HTMLFormElement | null;
@@ -76,10 +77,11 @@ const initReportingHub = (apiBase: string) => {
     !updateCommitButton ||
     !deletePreviewButton ||
     !deleteCommitButton ||
-    !queryPasscodeInput ||
-    !queryUnlockButton ||
-    !queryPasscodeStatus ||
-    !queryGuard
+    !pageGuard ||
+    !pagePasscodeInput ||
+    !pageUnlockButton ||
+    !pagePasscodeStatus ||
+    !reportingContent
   ) {
     return () => undefined;
   }
@@ -110,9 +112,9 @@ const initReportingHub = (apiBase: string) => {
     target.style.color = isError ? "#991b1b" : "#2563eb";
   };
 
-  const setQueryStatus = (text: string, isError: boolean) => {
-    queryPasscodeStatus.textContent = text;
-    queryPasscodeStatus.style.color = isError ? "#991b1b" : "#2563eb";
+  const setPageStatus = (text: string, isError: boolean) => {
+    pagePasscodeStatus.textContent = text;
+    pagePasscodeStatus.style.color = isError ? "#991b1b" : "#2563eb";
   };
 
   const setCommitEnabled = (button: HTMLButtonElement | null, enabled: boolean) => {
@@ -136,11 +138,12 @@ const initReportingHub = (apiBase: string) => {
     const queryButton = queryForm.querySelector("button[type='submit']") as HTMLButtonElement | null;
     if (queryTextarea) queryTextarea.disabled = locked;
     if (queryButton) queryButton.disabled = locked;
-    if (locked) {
-      queryGuard.classList.remove("query-guard--unlocked");
-    } else {
-      queryGuard.classList.add("query-guard--unlocked");
-    }
+  };
+
+  const setPageLockState = (locked: boolean) => {
+    pageGuard.classList.toggle("page-guard--hidden", !locked);
+    reportingContent.classList.toggle("reporting-content--locked", locked);
+    setQueryLockState(locked);
   };
 
   const fetchJson = async <T,>(url: string, options?: RequestInit): Promise<T> => {
@@ -356,7 +359,7 @@ const initReportingHub = (apiBase: string) => {
     const queryInput = queryForm.querySelector("textarea[name='query']") as HTMLTextAreaElement;
     const query = queryInput?.value.trim();
 
-      if (!queryUnlocked || !queryPasscode) {
+    if (!queryUnlocked || !queryPasscode) {
       setStatus("Enter the passcode to unlock queries.", "error");
       return;
     }
@@ -600,16 +603,29 @@ const initReportingHub = (apiBase: string) => {
     resetPendingActions();
   };
 
-  const handleQueryUnlock = () => {
-    const passcode = queryPasscodeInput.value.trim();
+  const handlePageUnlock = async () => {
+    const passcode = pagePasscodeInput.value.trim();
     if (!passcode) {
-      setQueryStatus("Enter the passcode provided by your admin.", true);
+      setPageStatus("Enter the passcode provided by your admin.", true);
       return;
     }
     queryPasscode = passcode;
-    queryPasscodeInput.value = "";
-    setQueryLockState(false);
-    setQueryStatus("Query access unlocked for this session.", false);
+    pagePasscodeInput.value = "";
+    setPageLockState(false);
+    setPageStatus("Access unlocked for this session.", false);
+    setStatus("Loading tables…");
+    try {
+      await loadTables();
+      await loadSchemaAndRows();
+      resetPendingActions();
+      setStatus("Ready");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Failed to connect.", "error");
+    }
+  };
+
+  const handlePageUnlockClick = () => {
+    handlePageUnlock().catch((error: Error) => setStatus(error.message, "error"));
   };
 
   const handleFormInput = () => {
@@ -638,15 +654,14 @@ const initReportingHub = (apiBase: string) => {
   insertForm.addEventListener("input", handleFormInput);
   updateForm.addEventListener("input", handleFormInput);
   deleteForm.addEventListener("input", handleFormInput);
-  queryUnlockButton.addEventListener("click", handleQueryUnlock);
+  pageUnlockButton.addEventListener("click", handlePageUnlockClick);
   if (prevButton) prevButton.addEventListener("click", handlePrevPage);
   if (nextButton) nextButton.addEventListener("click", handleNextPage);
 
   void (async () => {
     try {
-      await loadTables();
-      await loadSchemaAndRows();
-      setQueryLockState(true);
+      setPageLockState(true);
+      setStatus("Enter the passcode to access this page.");
       resetPendingActions();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Failed to connect.", "error");
@@ -673,7 +688,7 @@ const initReportingHub = (apiBase: string) => {
     insertForm.removeEventListener("input", handleFormInput);
     updateForm.removeEventListener("input", handleFormInput);
     deleteForm.removeEventListener("input", handleFormInput);
-    queryUnlockButton.removeEventListener("click", handleQueryUnlock);
+    pageUnlockButton.removeEventListener("click", handlePageUnlockClick);
     if (prevButton) prevButton.removeEventListener("click", handlePrevPage);
     if (nextButton) nextButton.removeEventListener("click", handleNextPage);
   };
@@ -704,144 +719,152 @@ const ReportingPage = ({ title, description, apiBase }: ReportingPageProps) => {
         </div>
       </header>
 
-      <main className="layout">
-        <section className="panel" database-explorer>
-          <h2>Database Explorer</h2>
+      <div className="page-guard" id="pageGuard">
+        <div className="page-guard__card">
+          <h2>Passcode required</h2>
+          <p>Enter the passcode provided by your admin to access this page.</p>
           <label className="field">
-            <span>Table</span>
-            <select id="tableSelect"></select>
+            <span>Passcode</span>
+            <input id="pagePasscode" type="password" placeholder="Enter passcode" />
           </label>
-          <div className="schema">
-            <h3>Schema</h3>
-            <ul id="schemaList"></ul>
-          </div>
-          <div className="query-section">
-            <h3>Custom Query</h3>
-            <p className="hint">Passcode required to unlock free-form queries.</p>
-            <div className="query-guard" id="queryGuard">
-              <label className="field">
-                <span>Passcode</span>
-                <input id="queryPasscode" type="password" placeholder="Enter passcode" />
-              </label>
-              <button type="button" id="unlockQuery">Unlock Query</button>
-              <p className="form-status" id="queryPasscodeStatus"></p>
-            </div>
-            <form id="queryForm" className="form">
-              <label>
-                <textarea name="query" rows={3} placeholder="SELECT * FROM [table] WHERE ..."></textarea>
-              </label>
-              <button type="submit">Execute Query</button>
-            </form>
-          </div>
-        </section>
+          <button type="button" id="unlockPage">Unlock Page</button>
+          <p className="form-status" id="pagePasscodeStatus"></p>
+        </div>
+      </div>
 
-        <section className="panel" data-preview>
-          <h2>Data Preview</h2>
-          <div className="toolbar">
-            <div className="toolbar-actions">
-              <button id="refreshButton">Refresh</button>
-              <button id="insertButton" className="icon-button" type="button" aria-label="Insert row">
-                +
-              </button>
+      <div className="reporting-content reporting-content--locked" id="reportingContent">
+        <main className="layout">
+          <section className="panel" database-explorer>
+            <h2>Database Explorer</h2>
+            <label className="field">
+              <span>Table</span>
+              <select id="tableSelect"></select>
+            </label>
+            <div className="schema">
+              <h3>Schema</h3>
+              <ul id="schemaList"></ul>
             </div>
-            <div className="pagination-controls">
-              <span id="pageInfo"></span>
-              <div className="pagination-buttons">
-                <button id="prevButton" type="button">← Prev</button>
-                <span id="rowCount"></span>
-                <button id="nextButton" type="button">Next →</button>
-              </div>
-            </div>
-          </div>
-          <div className="table-wrap">
-            <table id="dataTable">
-              <thead></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-          <dialog id="insertDialog" className="modal">
-            <div className="modal-body">
-              <div className="modal-header">
-                <h3>Insert</h3>
-                <button type="button" className="ghost-button" onClick={(event) => (event.currentTarget.closest("dialog") as HTMLDialogElement).close()}>
-                  Close
-                </button>
-              </div>
-              <form id="insertForm" className="form">
+            <div className="query-section">
+              <h3>Custom Query</h3>
+              <p className="hint">Page access is protected by a passcode.</p>
+              <form id="queryForm" className="form">
                 <label>
-                  <span>Values (JSON)</span>
-                  <textarea name="values" rows={4} placeholder='{"title":"New item","priority":"Medium"}'></textarea>
+                  <textarea name="query" rows={3} placeholder="SELECT * FROM [table] WHERE ..."></textarea>
                 </label>
-                <div className="form-actions">
-                  <button type="button" id="insertPreviewButton">Preview Insert</button>
-                  <button type="button" id="insertCommitButton" className="ghost-button">
-                    Confirm &amp; Commit
-                  </button>
-                </div>
-                <p className="form-status" data-form-status="insert"></p>
+                <button type="submit">Execute Query</button>
               </form>
             </div>
-          </dialog>
-          <dialog id="updateDialog" className="modal">
-            <div className="modal-body">
-              <div className="modal-header">
-                <h3>Update</h3>
-                <button type="button" className="ghost-button" onClick={(event) => (event.currentTarget.closest("dialog") as HTMLDialogElement).close()}>
-                  Close
+          </section>
+
+          <section className="panel" data-preview>
+            <h2>Data Preview</h2>
+            <div className="toolbar">
+              <div className="toolbar-actions">
+                <button id="refreshButton">Refresh</button>
+                <button id="insertButton" className="icon-button" type="button" aria-label="Insert row">
+                  +
                 </button>
               </div>
-              <form id="updateForm" className="form">
-                <label>
-                  <span>Key column</span>
-                  <input name="keyColumn" placeholder="IssueId" />
-                </label>
-                <label>
-                  <span>Key value</span>
-                  <input name="keyValue" placeholder="123" />
-                </label>
-                <label>
-                  <span>Updates (JSON)</span>
-                  <textarea name="updates" rows={4} placeholder='{"priority":"Low"}'></textarea>
-                </label>
-                <div className="form-actions">
-                  <button type="button" id="updatePreviewButton">Preview Update</button>
-                  <button type="button" id="updateCommitButton" className="ghost-button">
-                    Confirm &amp; Commit
-                  </button>
+              <div className="pagination-controls">
+                <span id="pageInfo"></span>
+                <div className="pagination-buttons">
+                  <button id="prevButton" type="button">← Prev</button>
+                  <span id="rowCount"></span>
+                  <button id="nextButton" type="button">Next →</button>
                 </div>
-                <p className="form-status" data-form-status="update"></p>
-              </form>
-            </div>
-          </dialog>
-          <dialog id="deleteDialog" className="modal">
-            <div className="modal-body">
-              <div className="modal-header">
-                <h3>Delete</h3>
-                <button type="button" className="ghost-button" onClick={(event) => (event.currentTarget.closest("dialog") as HTMLDialogElement).close()}>
-                  Close
-                </button>
               </div>
-              <form id="deleteForm" className="form">
-                <label>
-                  <span>Key column</span>
-                  <input name="keyColumn" placeholder="IssueId" />
-                </label>
-                <label>
-                  <span>Key value</span>
-                  <input name="keyValue" placeholder="123" />
-                </label>
-                <div className="form-actions">
-                  <button type="button" id="deletePreviewButton">Preview Delete</button>
-                  <button type="button" id="deleteCommitButton" className="danger-button">
-                    Confirm &amp; Commit
+            </div>
+
+            <div className="table-wrap">
+              <table id="dataTable">
+                <thead></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <dialog id="insertDialog" className="modal">
+              <div className="modal-body">
+                <div className="modal-header">
+                  <h3>Insert</h3>
+                  <button type="button" className="ghost-button" onClick={(event) => (event.currentTarget.closest("dialog") as HTMLDialogElement).close()}>
+                    Close
                   </button>
                 </div>
-                <p className="form-status" data-form-status="delete"></p>
-              </form>
-            </div>
-          </dialog>
-        </section>
-      </main>
+                <form id="insertForm" className="form">
+                  <label>
+                    <span>Values (JSON)</span>
+                    <textarea name="values" rows={4} placeholder='{"title":"New item","priority":"Medium"}'></textarea>
+                  </label>
+                  <div className="form-actions">
+                    <button type="button" id="insertPreviewButton">Preview Insert</button>
+                    <button type="button" id="insertCommitButton" className="ghost-button">
+                      Confirm &amp; Commit
+                    </button>
+                  </div>
+                  <p className="form-status" data-form-status="insert"></p>
+                </form>
+              </div>
+            </dialog>
+            <dialog id="updateDialog" className="modal">
+              <div className="modal-body">
+                <div className="modal-header">
+                  <h3>Update</h3>
+                  <button type="button" className="ghost-button" onClick={(event) => (event.currentTarget.closest("dialog") as HTMLDialogElement).close()}>
+                    Close
+                  </button>
+                </div>
+                <form id="updateForm" className="form">
+                  <label>
+                    <span>Key column</span>
+                    <input name="keyColumn" placeholder="IssueId" />
+                  </label>
+                  <label>
+                    <span>Key value</span>
+                    <input name="keyValue" placeholder="123" />
+                  </label>
+                  <label>
+                    <span>Updates (JSON)</span>
+                    <textarea name="updates" rows={4} placeholder='{"priority":"Low"}'></textarea>
+                  </label>
+                  <div className="form-actions">
+                    <button type="button" id="updatePreviewButton">Preview Update</button>
+                    <button type="button" id="updateCommitButton" className="ghost-button">
+                      Confirm &amp; Commit
+                    </button>
+                  </div>
+                  <p className="form-status" data-form-status="update"></p>
+                </form>
+              </div>
+            </dialog>
+            <dialog id="deleteDialog" className="modal">
+              <div className="modal-body">
+                <div className="modal-header">
+                  <h3>Delete</h3>
+                  <button type="button" className="ghost-button" onClick={(event) => (event.currentTarget.closest("dialog") as HTMLDialogElement).close()}>
+                    Close
+                  </button>
+                </div>
+                <form id="deleteForm" className="form">
+                  <label>
+                    <span>Key column</span>
+                    <input name="keyColumn" placeholder="IssueId" />
+                  </label>
+                  <label>
+                    <span>Key value</span>
+                    <input name="keyValue" placeholder="123" />
+                  </label>
+                  <div className="form-actions">
+                    <button type="button" id="deletePreviewButton">Preview Delete</button>
+                    <button type="button" id="deleteCommitButton" className="danger-button">
+                      Confirm &amp; Commit
+                    </button>
+                  </div>
+                  <p className="form-status" data-form-status="delete"></p>
+                </form>
+              </div>
+            </dialog>
+          </section>
+        </main>
+      </div>
     </div>
   );
 };

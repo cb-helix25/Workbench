@@ -218,6 +218,36 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
+button:disabled {
+  background: #d0d7e6;
+  color: var(--text-secondary);
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.ghost-button {
+  background: #fff;
+  color: var(--navy-800);
+  border: 1px solid var(--border-strong);
+  box-shadow: none;
+}
+
+.ghost-button:hover {
+  background: var(--blue-50);
+  box-shadow: none;
+  transform: none;
+}
+
+.danger-button {
+  background: linear-gradient(135deg, #d65542, #a63627);
+  border-color: #b43c2e;
+}
+
+.danger-button:hover {
+  background: linear-gradient(135deg, #e06b5b, #b43c2e);
+}
+
 .table-wrap {
   overflow-x: auto;
   border: 1px solid var(--border-soft);
@@ -363,6 +393,20 @@ button:focus-visible {
   gap: 10px;
 }
 
+.query-guard {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--border-strong);
+  background: #fff;
+}
+
+.query-guard--unlocked {
+  border-color: var(--blue-500);
+  background: var(--blue-100);
+}
+
 .query-section textarea {
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: 0.9rem;
@@ -397,6 +441,13 @@ button:focus-visible {
 
 .form {
   display: grid;
+  gap: 10px;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 10px;
 }
 

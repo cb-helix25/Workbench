@@ -10,6 +10,46 @@ function assertSafeIdentifier(value, label) {
   }
 }
 
+function assertQueryPasscode(req, res) {
+  const configuredPasscode = process.env.REPORTING_QUERY_PASSCODE;
+  if (!configuredPasscode) {
+    res.status(503).json({ error: "Query passcode is not configured." });
+    return false;
+  }
+
+  const provided = req.body?.passcode || req.headers["x-reporting-passcode"];
+  if (!provided || provided !== configuredPasscode) {
+    res.status(401).json({ error: "Invalid passcode." });
+    return false;
+  }
+
+  return true;
+}
+
+async function runInTransaction(pool, action, commit = false) {
+  const transaction = new sql.Transaction(pool);
+  await transaction.begin();
+
+  try {
+    const result = await action(transaction);
+    if (commit) {
+      await transaction.commit();
+    } else {
+      await transaction.rollback();
+    }
+    return result;
+  } catch (error) {
+    try {
+      if (!transaction._aborted) {
+        await transaction.rollback();
+      }
+    } catch (rollbackError) {
+      console.error("[REPORTING-HUB] Failed to rollback transaction:", rollbackError);
+    }
+    throw error;
+  }
+}
+
 async function fetchColumns(schema, table, secretClient, workspaceKey) {
   const pool = await getReportingPool(workspaceKey, secretClient);
   const result = await pool
@@ -126,6 +166,10 @@ function createReportingRouter(workspaceKey) {
       assertSafeIdentifier(schema, "schema");
       assertSafeIdentifier(table, "table");
 
+      if (!assertQueryPasscode(req, res)) {
+        return;
+      }
+
       if (!query || typeof query !== "string") {
         return res.status(400).json({ error: "Query string is required." });
       }
@@ -160,6 +204,48 @@ function createReportingRouter(workspaceKey) {
     }
   });
 
+  router.post("/tables/:schema/:table/insert/preview", async (req, res) => {
+    const { schema, table } = req.params;
+    const { values } = req.body || {};
+
+    try {
+      assertSafeIdentifier(schema, "schema");
+      assertSafeIdentifier(table, "table");
+
+      if (!values || typeof values !== "object" || Array.isArray(values)) {
+        return res.status(400).json({ error: "values must be an object." });
+      }
+
+      const secretClient = req.app.locals.secretClient;
+      const columns = await fetchColumns(schema, table, secretClient, workspaceKey);
+      const allowed = new Set(columns.map((col) => col.COLUMN_NAME));
+      const entries = Object.entries(values).filter(([key]) => allowed.has(key));
+
+      if (!entries.length) {
+        return res.status(400).json({ error: "No valid column values provided." });
+      }
+
+      const columnNames = entries.map(([key]) => `[${key}]`).join(", ");
+      const paramNames = entries.map(([key]) => `@${key}`).join(", ");
+
+      const pool = await getReportingPool(workspaceKey, secretClient);
+      const result = await runInTransaction(pool, async (transaction) => {
+        const request = transaction.request();
+        entries.forEach(([key, value]) => {
+          request.input(key, value);
+        });
+        const query = `INSERT INTO [${schema}].[${table}] (${columnNames}) VALUES (${paramNames})`;
+        const response = await request.query(query);
+        return response.rowsAffected?.[0] || 0;
+      });
+
+      res.json({ status: "preview", rowsAffected: result });
+    } catch (error) {
+      console.error("[REPORTING-HUB] Failed to preview insert:", error);
+      res.status(500).json({ error: "Failed to preview insert." });
+    }
+  });
+
   router.post("/tables/:schema/:table/insert", async (req, res) => {
     const { schema, table } = req.params;
     const { values } = req.body || {};
@@ -185,18 +271,84 @@ function createReportingRouter(workspaceKey) {
       const paramNames = entries.map(([key]) => `@${key}`).join(", ");
 
       const pool = await getReportingPool(workspaceKey, secretClient);
-      const request = pool.request();
-      entries.forEach(([key, value]) => {
-        request.input(key, value);
+      const rowsAffected = await runInTransaction(
+        pool,
+        async (transaction) => {
+          const request = transaction.request();
+          entries.forEach(([key, value]) => {
+            request.input(key, value);
+          });
+          const query = `INSERT INTO [${schema}].[${table}] (${columnNames}) VALUES (${paramNames})`;
+          const result = await request.query(query);
+          return result.rowsAffected?.[0] || 0;
+        },
+        true
+      );
+
+      res.json({
+        status: "inserted",
+        insertedColumns: entries.map(([key]) => key),
+        rowsAffected
       });
-
-      const query = `INSERT INTO [${schema}].[${table}] (${columnNames}) VALUES (${paramNames})`;
-      await request.query(query);
-
-      res.json({ status: "inserted", insertedColumns: entries.map(([key]) => key) });
     } catch (error) {
       console.error("[REPORTING-HUB] Failed to insert row:", error);
       res.status(500).json({ error: "Failed to insert row." });
+    }
+  });
+
+  router.patch("/tables/:schema/:table/update/preview", async (req, res) => {
+    const { schema, table } = req.params;
+    const { keyColumn, keyValue, updates } = req.body || {};
+
+    try {
+      assertSafeIdentifier(schema, "schema");
+      assertSafeIdentifier(table, "table");
+
+      if (!keyColumn || typeof keyColumn !== "string") {
+        return res.status(400).json({ error: "keyColumn is required." });
+      }
+
+      if (keyValue === undefined || keyValue === null) {
+        return res.status(400).json({ error: "keyValue is required." });
+      }
+
+      if (!updates || typeof updates !== "object" || Array.isArray(updates)) {
+        return res.status(400).json({ error: "updates must be an object." });
+      }
+
+      const secretClient = req.app.locals.secretClient;
+      const columns = await fetchColumns(schema, table, secretClient, workspaceKey);
+      const allowed = new Set(columns.map((col) => col.COLUMN_NAME));
+
+      if (!allowed.has(keyColumn)) {
+        return res.status(400).json({ error: "keyColumn is not a valid column." });
+      }
+
+      const entries = Object.entries(updates).filter(([key]) => allowed.has(key));
+
+      if (!entries.length) {
+        return res.status(400).json({ error: "No valid updates provided." });
+      }
+
+      const setClause = entries.map(([key]) => `[${key}] = @${key}`).join(", ");
+
+      const pool = await getReportingPool(workspaceKey, secretClient);
+      const rowsAffected = await runInTransaction(pool, async (transaction) => {
+        const request = transaction.request();
+        entries.forEach(([key, value]) => {
+          request.input(key, value);
+        });
+        request.input("keyValue", keyValue);
+
+        const query = `UPDATE [${schema}].[${table}] SET ${setClause} WHERE [${keyColumn}] = @keyValue`;
+        const result = await request.query(query);
+        return result.rowsAffected?.[0] || 0;
+      });
+
+      res.json({ status: "preview", rowsAffected });
+    } catch (error) {
+      console.error("[REPORTING-HUB] Failed to preview update:", error);
+      res.status(500).json({ error: "Failed to preview update." });
     }
   });
 
@@ -237,19 +389,67 @@ function createReportingRouter(workspaceKey) {
       const setClause = entries.map(([key]) => `[${key}] = @${key}`).join(", ");
 
       const pool = await getReportingPool(workspaceKey, secretClient);
-      const request = pool.request();
-      entries.forEach(([key, value]) => {
-        request.input(key, value);
-      });
-      request.input("keyValue", keyValue);
+      const rowsAffected = await runInTransaction(
+        pool,
+        async (transaction) => {
+          const request = transaction.request();
+          entries.forEach(([key, value]) => {
+            request.input(key, value);
+          });
+          request.input("keyValue", keyValue);
 
-      const query = `UPDATE [${schema}].[${table}] SET ${setClause} WHERE [${keyColumn}] = @keyValue`;
-      const result = await request.query(query);
+          const query = `UPDATE [${schema}].[${table}] SET ${setClause} WHERE [${keyColumn}] = @keyValue`;
+          const result = await request.query(query);
+          return result.rowsAffected?.[0] || 0;
+        },
+        true
+      );
 
-      res.json({ status: "updated", rowsAffected: result.rowsAffected?.[0] || 0 });
+      res.json({ status: "updated", rowsAffected });
     } catch (error) {
       console.error("[REPORTING-HUB] Failed to update row:", error);
       res.status(500).json({ error: "Failed to update row." });
+    }
+  });
+
+  router.delete("/tables/:schema/:table/delete/preview", async (req, res) => {
+    const { schema, table } = req.params;
+    const { keyColumn, keyValue } = req.body || {};
+
+    try {
+      assertSafeIdentifier(schema, "schema");
+      assertSafeIdentifier(table, "table");
+
+      if (!keyColumn || typeof keyColumn !== "string") {
+        return res.status(400).json({ error: "keyColumn is required." });
+      }
+
+      if (keyValue === undefined || keyValue === null) {
+        return res.status(400).json({ error: "keyValue is required." });
+      }
+
+      const secretClient = req.app.locals.secretClient;
+      const columns = await fetchColumns(schema, table, secretClient, workspaceKey);
+      const allowed = new Set(columns.map((col) => col.COLUMN_NAME));
+
+      if (!allowed.has(keyColumn)) {
+        return res.status(400).json({ error: "keyColumn is not a valid column." });
+      }
+
+      const pool = await getReportingPool(workspaceKey, secretClient);
+      const rowsAffected = await runInTransaction(pool, async (transaction) => {
+        const request = transaction.request();
+        request.input("keyValue", keyValue);
+
+        const query = `DELETE FROM [${schema}].[${table}] WHERE [${keyColumn}] = @keyValue`;
+        const result = await request.query(query);
+        return result.rowsAffected?.[0] || 0;
+      });
+
+      res.json({ status: "preview", rowsAffected });
+    } catch (error) {
+      console.error("[REPORTING-HUB] Failed to preview delete:", error);
+      res.status(500).json({ error: "Failed to preview delete." });
     }
   });
 
@@ -278,13 +478,20 @@ function createReportingRouter(workspaceKey) {
       }
 
       const pool = await getReportingPool(workspaceKey, secretClient);
-      const request = pool.request();
-      request.input("keyValue", keyValue);
+      const rowsAffected = await runInTransaction(
+        pool,
+        async (transaction) => {
+          const request = transaction.request();
+          request.input("keyValue", keyValue);
 
-      const query = `DELETE FROM [${schema}].[${table}] WHERE [${keyColumn}] = @keyValue`;
-      const result = await request.query(query);
+          const query = `DELETE FROM [${schema}].[${table}] WHERE [${keyColumn}] = @keyValue`;
+          const result = await request.query(query);
+          return result.rowsAffected?.[0] || 0;
+        },
+        true
+      );
 
-      res.json({ status: "deleted", rowsAffected: result.rowsAffected?.[0] || 0 });
+      res.json({ status: "deleted", rowsAffected });
     } catch (error) {
       console.error("[REPORTING-HUB] Failed to delete row:", error);
       res.status(500).json({ error: "Failed to delete row." });

@@ -35,6 +35,10 @@ const initReportingHub = (apiBase: string) => {
   const refreshButton = document.getElementById("refreshButton") as HTMLButtonElement | null;
   const insertButton = document.getElementById("insertButton") as HTMLButtonElement | null;
   const queryForm = document.getElementById("queryForm") as HTMLFormElement | null;
+  const queryPasscodeInput = document.getElementById("queryPasscode") as HTMLInputElement | null;
+  const queryUnlockButton = document.getElementById("unlockQuery") as HTMLButtonElement | null;
+  const queryPasscodeStatus = document.getElementById("queryPasscodeStatus") as HTMLParagraphElement | null;
+  const queryGuard = document.getElementById("queryGuard") as HTMLDivElement | null;
 
   const insertForm = document.getElementById("insertForm") as HTMLFormElement | null;
   const updateForm = document.getElementById("updateForm") as HTMLFormElement | null;
@@ -42,6 +46,12 @@ const initReportingHub = (apiBase: string) => {
   const insertDialog = document.getElementById("insertDialog") as HTMLDialogElement | null;
   const updateDialog = document.getElementById("updateDialog") as HTMLDialogElement | null;
   const deleteDialog = document.getElementById("deleteDialog") as HTMLDialogElement | null;
+  const insertPreviewButton = document.getElementById("insertPreviewButton") as HTMLButtonElement | null;
+  const insertCommitButton = document.getElementById("insertCommitButton") as HTMLButtonElement | null;
+  const updatePreviewButton = document.getElementById("updatePreviewButton") as HTMLButtonElement | null;
+  const updateCommitButton = document.getElementById("updateCommitButton") as HTMLButtonElement | null;
+  const deletePreviewButton = document.getElementById("deletePreviewButton") as HTMLButtonElement | null;
+  const deleteCommitButton = document.getElementById("deleteCommitButton") as HTMLButtonElement | null;
 
   if (
     !tableSelect ||
@@ -59,7 +69,17 @@ const initReportingHub = (apiBase: string) => {
     !deleteForm ||
     !insertDialog ||
     !updateDialog ||
-    !deleteDialog
+    !deleteDialog ||
+    !insertPreviewButton ||
+    !insertCommitButton ||
+    !updatePreviewButton ||
+    !updateCommitButton ||
+    !deletePreviewButton ||
+    !deleteCommitButton ||
+    !queryPasscodeInput ||
+    !queryUnlockButton ||
+    !queryPasscodeStatus ||
+    !queryGuard
   ) {
     return () => undefined;
   }
@@ -69,6 +89,13 @@ const initReportingHub = (apiBase: string) => {
   let pageSize = 50;
   let totalPages = 1;
   let totalRows = 0;
+  let queryPasscode = "";
+  let queryUnlocked = false;
+  let pendingInsertPayload: { values: JsonRecord } | null = null;
+  let pendingUpdatePayload:
+    | { keyColumn: string; keyValue: FormDataEntryValue; updates: JsonRecord }
+    | null = null;
+  let pendingDeletePayload: { keyColumn: string; keyValue: FormDataEntryValue } | null = null;
 
   const setStatus = (text: string, tone: "info" | "error" = "info") => {
     statusMessage.textContent = text;
@@ -81,6 +108,39 @@ const initReportingHub = (apiBase: string) => {
     if (!target) return;
     target.textContent = text;
     target.style.color = isError ? "#991b1b" : "#2563eb";
+  };
+
+  const setQueryStatus = (text: string, isError: boolean) => {
+    queryPasscodeStatus.textContent = text;
+    queryPasscodeStatus.style.color = isError ? "#991b1b" : "#2563eb";
+  };
+
+  const setCommitEnabled = (button: HTMLButtonElement | null, enabled: boolean) => {
+    if (!button) return;
+    button.disabled = !enabled;
+  };
+
+  const resetPendingActions = () => {
+    pendingInsertPayload = null;
+    pendingUpdatePayload = null;
+    pendingDeletePayload = null;
+    setCommitEnabled(insertCommitButton, false);
+    setCommitEnabled(updateCommitButton, false);
+    setCommitEnabled(deleteCommitButton, false);
+  };
+
+  const setQueryLockState = (locked: boolean) => {
+    queryUnlocked = !locked;
+    queryForm.dataset.locked = locked ? "true" : "false";
+    const queryTextarea = queryForm.querySelector("textarea[name='query']") as HTMLTextAreaElement | null;
+    const queryButton = queryForm.querySelector("button[type='submit']") as HTMLButtonElement | null;
+    if (queryTextarea) queryTextarea.disabled = locked;
+    if (queryButton) queryButton.disabled = locked;
+    if (locked) {
+      queryGuard.classList.remove("query-guard--unlocked");
+    } else {
+      queryGuard.classList.add("query-guard--unlocked");
+    }
   };
 
   const fetchJson = async <T,>(url: string, options?: RequestInit): Promise<T> => {
@@ -296,6 +356,12 @@ const initReportingHub = (apiBase: string) => {
     const queryInput = queryForm.querySelector("textarea[name='query']") as HTMLTextAreaElement;
     const query = queryInput?.value.trim();
 
+      if (!queryUnlocked || !queryPasscode) {
+      setStatus("Enter the passcode to unlock queries.", "error");
+      return;
+    }
+
+
     if (!query) {
       setStatus("Please enter a query.", "error");
       return;
@@ -309,7 +375,7 @@ const initReportingHub = (apiBase: string) => {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query })
+          body: JSON.stringify({ query, passcode: queryPasscode })
         }
       );
 
@@ -332,33 +398,65 @@ const initReportingHub = (apiBase: string) => {
     });
   };
 
-  const handleInsert = async (event: SubmitEvent) => {
-    event.preventDefault();
+  const handleInsertPreview = async () => {
     setFormStatus("insert", "", false);
+    setCommitEnabled(insertCommitButton, false);
 
     try {
       const values = parseJsonField(
         new FormData(insertForm).get("values"),
         "Insert values missing."
       );
-      await fetchJson(
-        `${apiBase}/tables/${currentSelection.schema}/${currentSelection.table}/insert`,
+      const result = await fetchJson<{ rowsAffected: number }>(
+        `${apiBase}/tables/${currentSelection.schema}/${currentSelection.table}/insert/preview`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ values })
         }
       );
-      setFormStatus("insert", "Insert successful.", false);
+
+      pendingInsertPayload = { values };
+      setFormStatus(
+        "insert",
+        `Preview complete: ${result.rowsAffected} row(s) would be inserted. Confirm to commit.`,
+        false
+      );
+      setCommitEnabled(insertCommitButton, true);
+    } catch (error) {
+      setFormStatus("insert", error instanceof Error ? error.message : "Insert preview failed.", true);
+    }
+  };
+
+  const handleInsertCommit = async () => {
+    if (!pendingInsertPayload) {
+      setFormStatus("insert", "Run a preview first to enable commit.", true);
+      return;
+    }
+
+    setFormStatus("insert", "Committing insert…", false);
+
+    try {
+      await fetchJson(
+        `${apiBase}/tables/${currentSelection.schema}/${currentSelection.table}/insert`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pendingInsertPayload })
+        }
+      );
+      setFormStatus("insert", "Insert committed.", false);
+      pendingInsertPayload = null;
+      setCommitEnabled(insertCommitButton, false);
       await loadSchemaAndRows();
     } catch (error) {
       setFormStatus("insert", error instanceof Error ? error.message : "Insert failed.", true);
     }
   };
 
-  const handleUpdate = async (event: SubmitEvent) => {
-    event.preventDefault();
+  const handleUpdatePreview = async () => {
     setFormStatus("update", "", false);
+    setCommitEnabled(updateCommitButton, false);
 
     try {
       const formData = new FormData(updateForm);
@@ -366,39 +464,115 @@ const initReportingHub = (apiBase: string) => {
       const keyValue = formData.get("keyValue");
       const updates = parseJsonField(formData.get("updates"), "Update values missing.");
 
-      await fetchJson(
-        `${apiBase}/tables/${currentSelection.schema}/${currentSelection.table}/update`,
+      if (!keyColumn || typeof keyColumn !== "string") {
+        throw new Error("Key column is required.");
+      }
+      if (keyValue === null) {
+        throw new Error("Key value is required.");
+      }
+
+      const result = await fetchJson<{ rowsAffected: number }>(
+        `${apiBase}/tables/${currentSelection.schema}/${currentSelection.table}/update/preview`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ keyColumn, keyValue, updates })
         }
       );
-      setFormStatus("update", "Update successful.", false);
+
+      pendingUpdatePayload = { keyColumn, keyValue, updates };
+      setFormStatus(
+        "update",
+        `Preview complete: ${result.rowsAffected} row(s) would be updated. Confirm to commit.`,
+        false
+      );
+      setCommitEnabled(updateCommitButton, true);
+    } catch (error) {
+      setFormStatus("update", error instanceof Error ? error.message : "Update preview failed.", true);
+    }
+  };
+
+  const handleUpdateCommit = async () => {
+    if (!pendingUpdatePayload) {
+      setFormStatus("update", "Run a preview first to enable commit.", true);
+      return;
+    }
+
+    setFormStatus("update", "Committing update…", false);
+
+    try {
+      await fetchJson(
+        `${apiBase}/tables/${currentSelection.schema}/${currentSelection.table}/update`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(pendingUpdatePayload)
+        }
+      );
+      setFormStatus("update", "Update committed.", false);
+      pendingUpdatePayload = null;
+      setCommitEnabled(updateCommitButton, false);
       await loadSchemaAndRows();
     } catch (error) {
       setFormStatus("update", error instanceof Error ? error.message : "Update failed.", true);
     }
   };
 
-  const handleDelete = async (event: SubmitEvent) => {
-    event.preventDefault();
+  const handleDeletePreview = async () => {
     setFormStatus("delete", "", false);
+    setCommitEnabled(deleteCommitButton, false);
 
     try {
       const formData = new FormData(deleteForm);
       const keyColumn = formData.get("keyColumn");
       const keyValue = formData.get("keyValue");
 
-      await fetchJson(
-        `${apiBase}/tables/${currentSelection.schema}/${currentSelection.table}/delete`,
+      if (!keyColumn || typeof keyColumn !== "string") {
+        throw new Error("Key column is required.");
+      }
+
+      const result = await fetchJson<{ rowsAffected: number }>(
+        `${apiBase}/tables/${currentSelection.schema}/${currentSelection.table}/delete/preview`,
         {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ keyColumn, keyValue })
         }
       );
-      setFormStatus("delete", "Delete successful.", false);
+
+      pendingDeletePayload = { keyColumn, keyValue };
+      setFormStatus(
+        "delete",
+        `Preview complete: ${result.rowsAffected} row(s) would be deleted. Confirm to commit.`,
+        false
+      );
+      setCommitEnabled(deleteCommitButton, true);
+    } catch (error) {
+      setFormStatus("delete", error instanceof Error ? error.message : "Delete preview failed.", true);
+    }
+  };
+
+  const handleDeleteCommit = async () => {
+    if (!pendingDeletePayload) {
+      setFormStatus("delete", "Run a preview first to enable commit.", true);
+      return;
+    }
+
+    setFormStatus("delete", "Committing delete…", false);
+
+    try {
+
+      await fetchJson(
+        `${apiBase}/tables/${currentSelection.schema}/${currentSelection.table}/delete`,
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(pendingDeletePayload)
+        }
+      );
+      setFormStatus("delete", "Delete committed.", false);
+      pendingDeletePayload = null;
+      setCommitEnabled(deleteCommitButton, false);
       await loadSchemaAndRows();
     } catch (error) {
       setFormStatus("delete", error instanceof Error ? error.message : "Delete failed.", true);
@@ -422,19 +596,49 @@ const initReportingHub = (apiBase: string) => {
     if (event.target === deleteDialog) deleteDialog.close();
   };
 
+  const handleDialogClose = () => {
+    resetPendingActions();
+  };
+
+  const handleQueryUnlock = () => {
+    const passcode = queryPasscodeInput.value.trim();
+    if (!passcode) {
+      setQueryStatus("Enter the passcode provided by your admin.", true);
+      return;
+    }
+    queryPasscode = passcode;
+    queryPasscodeInput.value = "";
+    setQueryLockState(false);
+    setQueryStatus("Query access unlocked for this session.", false);
+  };
+
+  const handleFormInput = () => {
+    resetPendingActions();
+  };
+
   const prevButton = document.getElementById("prevButton") as HTMLButtonElement | null;
   const nextButton = document.getElementById("nextButton") as HTMLButtonElement | null;
 
   refreshButton.addEventListener("click", handleRefresh);
   tableSelect.addEventListener("change", handleTableChange);
   queryForm.addEventListener("submit", handleQuery);
-  insertForm.addEventListener("submit", handleInsert);
-  updateForm.addEventListener("submit", handleUpdate);
-  deleteForm.addEventListener("submit", handleDelete);
   insertButton.addEventListener("click", handleOpenInsert);
   insertDialog.addEventListener("click", handleInsertDialogClick);
   updateDialog.addEventListener("click", handleUpdateDialogClick);
   deleteDialog.addEventListener("click", handleDeleteDialogClick);
+  insertDialog.addEventListener("close", handleDialogClose);
+  updateDialog.addEventListener("close", handleDialogClose);
+  deleteDialog.addEventListener("close", handleDialogClose);
+  insertPreviewButton.addEventListener("click", handleInsertPreview);
+  insertCommitButton.addEventListener("click", handleInsertCommit);
+  updatePreviewButton.addEventListener("click", handleUpdatePreview);
+  updateCommitButton.addEventListener("click", handleUpdateCommit);
+  deletePreviewButton.addEventListener("click", handleDeletePreview);
+  deleteCommitButton.addEventListener("click", handleDeleteCommit);
+  insertForm.addEventListener("input", handleFormInput);
+  updateForm.addEventListener("input", handleFormInput);
+  deleteForm.addEventListener("input", handleFormInput);
+  queryUnlockButton.addEventListener("click", handleQueryUnlock);
   if (prevButton) prevButton.addEventListener("click", handlePrevPage);
   if (nextButton) nextButton.addEventListener("click", handleNextPage);
 
@@ -442,6 +646,8 @@ const initReportingHub = (apiBase: string) => {
     try {
       await loadTables();
       await loadSchemaAndRows();
+      setQueryLockState(true);
+      resetPendingActions();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Failed to connect.", "error");
     }
@@ -451,13 +657,23 @@ const initReportingHub = (apiBase: string) => {
     refreshButton.removeEventListener("click", handleRefresh);
     tableSelect.removeEventListener("change", handleTableChange);
     queryForm.removeEventListener("submit", handleQuery);
-    insertForm.removeEventListener("submit", handleInsert);
-    updateForm.removeEventListener("submit", handleUpdate);
-    deleteForm.removeEventListener("submit", handleDelete);
     insertButton.removeEventListener("click", handleOpenInsert);
     insertDialog.removeEventListener("click", handleInsertDialogClick);
     updateDialog.removeEventListener("click", handleUpdateDialogClick);
     deleteDialog.removeEventListener("click", handleDeleteDialogClick);
+    insertDialog.removeEventListener("close", handleDialogClose);
+    updateDialog.removeEventListener("close", handleDialogClose);
+    deleteDialog.removeEventListener("close", handleDialogClose);
+    insertPreviewButton.removeEventListener("click", handleInsertPreview);
+    insertCommitButton.removeEventListener("click", handleInsertCommit);
+    updatePreviewButton.removeEventListener("click", handleUpdatePreview);
+    updateCommitButton.removeEventListener("click", handleUpdateCommit);
+    deletePreviewButton.removeEventListener("click", handleDeletePreview);
+    deleteCommitButton.removeEventListener("click", handleDeleteCommit);
+    insertForm.removeEventListener("input", handleFormInput);
+    updateForm.removeEventListener("input", handleFormInput);
+    deleteForm.removeEventListener("input", handleFormInput);
+    queryUnlockButton.removeEventListener("click", handleQueryUnlock);
     if (prevButton) prevButton.removeEventListener("click", handlePrevPage);
     if (nextButton) nextButton.removeEventListener("click", handleNextPage);
   };
@@ -501,6 +717,15 @@ const ReportingPage = ({ title, description, apiBase }: ReportingPageProps) => {
           </div>
           <div className="query-section">
             <h3>Custom Query</h3>
+            <p className="hint">Passcode required to unlock free-form queries.</p>
+            <div className="query-guard" id="queryGuard">
+              <label className="field">
+                <span>Passcode</span>
+                <input id="queryPasscode" type="password" placeholder="Enter passcode" />
+              </label>
+              <button type="button" id="unlockQuery">Unlock Query</button>
+              <p className="form-status" id="queryPasscodeStatus"></p>
+            </div>
             <form id="queryForm" className="form">
               <label>
                 <textarea name="query" rows={3} placeholder="SELECT * FROM [table] WHERE ..."></textarea>
@@ -547,7 +772,12 @@ const ReportingPage = ({ title, description, apiBase }: ReportingPageProps) => {
                   <span>Values (JSON)</span>
                   <textarea name="values" rows={4} placeholder='{"title":"New item","priority":"Medium"}'></textarea>
                 </label>
-                <button type="submit">Insert Row</button>
+                <div className="form-actions">
+                  <button type="button" id="insertPreviewButton">Preview Insert</button>
+                  <button type="button" id="insertCommitButton" className="ghost-button">
+                    Confirm &amp; Commit
+                  </button>
+                </div>
                 <p className="form-status" data-form-status="insert"></p>
               </form>
             </div>
@@ -573,7 +803,12 @@ const ReportingPage = ({ title, description, apiBase }: ReportingPageProps) => {
                   <span>Updates (JSON)</span>
                   <textarea name="updates" rows={4} placeholder='{"priority":"Low"}'></textarea>
                 </label>
-                <button type="submit">Update Row</button>
+                <div className="form-actions">
+                  <button type="button" id="updatePreviewButton">Preview Update</button>
+                  <button type="button" id="updateCommitButton" className="ghost-button">
+                    Confirm &amp; Commit
+                  </button>
+                </div>
                 <p className="form-status" data-form-status="update"></p>
               </form>
             </div>
@@ -595,7 +830,12 @@ const ReportingPage = ({ title, description, apiBase }: ReportingPageProps) => {
                   <span>Key value</span>
                   <input name="keyValue" placeholder="123" />
                 </label>
-                <button type="submit">Delete Row</button>
+                <div className="form-actions">
+                  <button type="button" id="deletePreviewButton">Preview Delete</button>
+                  <button type="button" id="deleteCommitButton" className="danger-button">
+                    Confirm &amp; Commit
+                  </button>
+                </div>
                 <p className="form-status" data-form-status="delete"></p>
               </form>
             </div>

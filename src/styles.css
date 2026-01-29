@@ -448,6 +448,10 @@ button:disabled {
   color: var(--text-secondary);
 }
 
+.page-guard__card #pagePasscode {
+  max-width: 280px;
+}
+
 .reporting-content--locked {
   pointer-events: none;
   user-select: none;

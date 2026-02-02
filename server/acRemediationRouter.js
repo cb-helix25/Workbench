@@ -4,6 +4,41 @@ const { getReportingPool } = require("./db");
 
 const DEFAULT_WORKSPACE = "helix-core-data";
 const CONTACT_TABLE = "dbo.enquiries";
+const CONTACT_SELECT_FIELDS = [
+  "ID",
+  "touchpoint_date",
+  "Contact_referrer",
+  "Method_of_Contact",
+  "Mailing_Street",
+  "Referral_URL",
+  "Point_of_Contact",
+  "Ultimate_Source",
+  "Mailing_County",
+  "Postal_Code",
+  "City",
+  "Country",
+  "Call_Taker",
+  "Area_of_Work",
+  "Initial_first_call_notes",
+  "Value"
+];
+
+const ADDITIONAL_FIELD_MAPPINGS = [
+  { key: "sql_contact_referrer", column: "Contact_referrer", perstag: "%CONTACT_REFERRER%" },
+  { key: "sql_method_of_contact", column: "Method_of_Contact", perstag: "%METHOD_OF_CONTACT%" },
+  { key: "sql_mailing_street", column: "Mailing_Street", perstag: "%MAILING_STREET_1%" },
+  { key: "sql_referral_url", column: "Referral_URL", perstag: "%REFERRAL_URL%" },
+  { key: "sql_point_of_contact", column: "Point_of_Contact", perstag: "%POINT_OF_CONTACT%" },
+  { key: "sql_ultimate_source", column: "Ultimate_Source", perstag: "%ULTIMATE_SOURCE%" },
+  { key: "sql_mailing_county", column: "Mailing_County", perstag: "%MAILING_COUNTY%" },
+  { key: "sql_postal_code", column: "Postal_Code", perstag: "%MAILING_POSTAL_CODE%" },
+  { key: "sql_city", column: "City", perstag: "%MAILING_CITY%" },
+  { key: "sql_country", column: "Country", perstag: "%MAILING_COUNTRY%" },
+  { key: "sql_call_taker", column: "Call_Taker", perstag: "%CALL_TAKER%" },
+  { key: "sql_area_of_work", column: "Area_of_Work", perstag: "%AREA_OF_WORK%" },
+  { key: "sql_initial_first_call_notes", column: "Initial_first_call_notes", perstag: "%INITIAL_FIRST_CALL_NOTES%" },
+  { key: "sql_value", column: "Value", perstag: "%VALUE%" }
+];
 
 const normalizeHeader = (value) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
 
@@ -113,7 +148,7 @@ const fetchAcContactIdByEmail = async (baseUrl, apiKey, email) => {
   return contact?.id || null;
 };
 
-const updateTouchpointField = async (baseUrl, apiKey, fieldId, contactId, value) => {
+const updateFieldValue = async (baseUrl, apiKey, fieldId, contactId, value) => {
   const url = buildApiUrl(baseUrl, "/fieldValues");
   await fetchJson(url, {
     method: "POST",
@@ -132,9 +167,11 @@ const updateTouchpointField = async (baseUrl, apiKey, fieldId, contactId, value)
   });
 };
 
-// Resolve an ActiveCampaign custom field ID using its personalization tag (e.g. "%TOUCHPOINT_DATE%").
+const normalizePerstag = (value) => String(value || "").replace(/^%|%$/g, "").toUpperCase();
+
+// Resolve ActiveCampaign custom field IDs using personalization tags (e.g. "%TOUCHPOINT_DATE%").
 // Falls back to matching by title if perstag/tag isn't present.
-const resolveFieldIdByPerstag = async (baseUrl, apiKey, perstag) => {
+const resolveFieldIdsByPerstags = async (baseUrl, apiKey, perstags) => {
   const url = buildApiUrl(baseUrl, "/fields");
   const payload = await fetchJson(url, {
     method: "GET",
@@ -145,27 +182,36 @@ const resolveFieldIdByPerstag = async (baseUrl, apiKey, perstag) => {
   });
 
   const fields = payload?.fields || [];
-  const normalized = String(perstag || "").replace(/^%|%$/g, "").toUpperCase();
+  const map = {};
+  const uniquePerstags = Array.from(new Set(perstags.map((tag) => normalizePerstag(tag)).filter(Boolean)));
 
-  const matchByPerstag = fields.find((f) => {
-    const tag = String(f?.perstag || f?.tag || "").replace(/^%|%$/g, "").toUpperCase();
-    return tag && tag === normalized;
+  uniquePerstags.forEach((tag) => {
+    const matchByPerstag = fields.find((field) => {
+      const fieldTag = normalizePerstag(field?.perstag || field?.tag);
+      return fieldTag && fieldTag === tag;
+    });
+
+    if (matchByPerstag?.id) {
+      map[tag] = matchByPerstag.id;
+      return;
+    }
+
+    const matchByTitle = fields.find(
+      (field) => normalizePerstag(field?.title) === tag
+    );
+    map[tag] = matchByTitle?.id || null;
   });
 
-  if (matchByPerstag?.id) {
-    return matchByPerstag.id;
-  }
-
-  const matchByTitle = fields.find((f) => String(f?.title || "").toUpperCase() === normalized);
-  return matchByTitle?.id || null;
+  return map;
 };
 
-const fetchTouchpointDate = async (pool, identifierType, identifier, resolvedContactId) => {
+const fetchContactData = async (pool, identifierType, identifier, resolvedContactId) => {
+  const selectFields = CONTACT_SELECT_FIELDS.join(", ");
   if (identifierType === "email") {
     const result = await pool
       .request()
       .input("email", sql.NVarChar, identifier)
-      .query(`SELECT TOP 1 ID, touchpoint_date FROM ${CONTACT_TABLE} WHERE email = @email`);
+      .query(`SELECT TOP 1 ${selectFields} FROM ${CONTACT_TABLE} WHERE email = @email`);
 
     if (result.recordset[0]) {
       return result.recordset[0];
@@ -175,7 +221,7 @@ const fetchTouchpointDate = async (pool, identifierType, identifier, resolvedCon
       const fallback = await pool
         .request()
         .input("ac_contact_id", sql.NVarChar, resolvedContactId)
-        .query(`SELECT TOP 1 ID, touchpoint_date FROM ${CONTACT_TABLE} WHERE ID = @ac_contact_id`);
+        .query(`SELECT TOP 1 ${selectFields} FROM ${CONTACT_TABLE} WHERE ID = @ac_contact_id`);
       return fallback.recordset[0] || null;
     }
 
@@ -185,7 +231,7 @@ const fetchTouchpointDate = async (pool, identifierType, identifier, resolvedCon
   const result = await pool
     .request()
     .input("ac_contact_id", sql.NVarChar, identifier)
-    .query(`SELECT TOP 1 ID, touchpoint_date FROM ${CONTACT_TABLE} WHERE ID = @ac_contact_id`);
+    .query(`SELECT TOP 1 ${selectFields} FROM ${CONTACT_TABLE} WHERE ID = @ac_contact_id`);
   return result.recordset[0] || null;
 };
 
@@ -371,25 +417,43 @@ function createAcRemediationRouter() {
       });
     }
 
-    // If field ID wasn't provided via env, try resolving it via personalization tag.
-    if (!fieldId) {
-      try {
-        const perstag = (process.env.TOUCHPOINT_DATE_TAG || "%TOUCHPOINT_DATE%").replace(/^%|%$/g, "");
-        console.log("[AC-REMEDIATION-RUN] Resolving field ID from perstag:", perstag);
-        fieldId = await resolveFieldIdByPerstag(baseUrl, apiKey, perstag);
-      } catch (err) {
-        console.error("[AC-REMEDIATION-RUN] Failed to resolve field ID:", err);
-      }
-      if (!fieldId) {
-        return res.status(500).json({
-          error: "Could not resolve touchpoint field ID from ActiveCampaign.",
-          details: {
-            triedTag: process.env.TOUCHPOINT_DATE_TAG || "%TOUCHPOINT_DATE%"
-          }
-        });
-      }
-      console.log("[AC-REMEDIATION-RUN] Resolved field ID:", fieldId);
+    const touchpointPerstag = process.env.TOUCHPOINT_DATE_TAG || "%TOUCHPOINT_DATE%";
+    const perstagsToResolve = [
+      touchpointPerstag,
+      ...ADDITIONAL_FIELD_MAPPINGS.map((mapping) => mapping.perstag)
+    ];
+
+    let fieldIdMap;
+    try {
+      fieldIdMap = await resolveFieldIdsByPerstags(baseUrl, apiKey, perstagsToResolve);
+    } catch (error) {
+      console.error("[AC-REMEDIATION-RUN] Failed to resolve field IDs:", error);
+      return res.status(500).json({
+        error: "Failed to resolve field IDs from ActiveCampaign.",
+        details: error.message
+      });
     }
+
+    const normalizedTouchpointTag = normalizePerstag(touchpointPerstag);
+    const resolvedTouchpointFieldId = fieldIdMap[normalizedTouchpointTag];
+
+    if (!fieldId && resolvedTouchpointFieldId) {
+      fieldId = resolvedTouchpointFieldId;
+    }
+    if (!fieldId) {
+      return res.status(500).json({
+        error: "Could not resolve touchpoint field ID from ActiveCampaign.",
+        details: {
+          triedTag: touchpointPerstag
+        }
+      });
+    }
+
+    const additionalFieldIds = ADDITIONAL_FIELD_MAPPINGS.reduce((acc, mapping) => {
+      const normalizedTag = normalizePerstag(mapping.perstag);
+      acc[mapping.key] = fieldIdMap[normalizedTag] || null;
+      return acc;
+    }, {});
     // Use the shared SQL helper to fetch the touchpoint date from the reporting database.
     console.log("[AC-REMEDIATION-RUN] Connecting to SQL database...");
     const pool = await getReportingPool(DEFAULT_WORKSPACE, secretClient);
@@ -402,6 +466,20 @@ function createAcRemediationRouter() {
         identifier,
         resolved_ac_contact_id: null,
         sql_touchpoint_date: null,
+        sql_contact_referrer: null,
+        sql_method_of_contact: null,
+        sql_mailing_street: null,
+        sql_referral_url: null,
+        sql_point_of_contact: null,
+        sql_ultimate_source: null,
+        sql_mailing_county: null,
+        sql_postal_code: null,
+        sql_city: null,
+        sql_country: null,
+        sql_call_taker: null,
+        sql_area_of_work: null,
+        sql_initial_first_call_notes: null,
+        sql_value: null,
         status: "pending",
         error: null
       };
@@ -422,35 +500,72 @@ function createAcRemediationRouter() {
 
         result.resolved_ac_contact_id = resolvedContactId;
 
-        // Pull the SQL touchpoint date for the contact.
-        const sqlRecord = await fetchTouchpointDate(
+        // Pull SQL contact data for the contact.
+        const sqlRecord = await fetchContactData(
           pool,
           identifierType,
           identifier,
           resolvedContactId
         );
 
-        if (!sqlRecord || !sqlRecord.touchpoint_date) {
+        if (!sqlRecord) {
           result.status = "skipped";
-          result.error = "Touchpoint date not found in SQL.";
+          result.error = "Contact not found in SQL.";
           results.push(result);
           continue;
         }
 
-        // Normalize the date to an ISO-8601 UTC string before sending to ActiveCampaign.
-        const normalizedDate = normalizeTouchpointDate(sqlRecord.touchpoint_date);
-        if (!normalizedDate) {
-          result.status = "skipped";
-          result.error = "Touchpoint date is empty.";
-          results.push(result);
-          continue;
+        let updateCount = 0;
+        const updateErrors = [];
+
+        if (sqlRecord.touchpoint_date) {
+          try {
+            const normalizedDate = normalizeTouchpointDate(sqlRecord.touchpoint_date);
+            await updateFieldValue(baseUrl, apiKey, fieldId, resolvedContactId, normalizedDate);
+            result.sql_touchpoint_date = normalizedDate;
+            updateCount += 1;
+          } catch (error) {
+            updateErrors.push("Failed to sync touchpoint date.");
+          }
+        } else {
+          result.sql_touchpoint_date = null;
         }
 
-        // Update the ActiveCampaign custom field with the touchpoint date.
-        await updateTouchpointField(baseUrl, apiKey, fieldId, resolvedContactId, normalizedDate);
+        for (const mapping of ADDITIONAL_FIELD_MAPPINGS) {
+          const rawValue = sqlRecord[mapping.column];
+          const normalizedValue =
+            rawValue === null || rawValue === undefined
+              ? null
+              : String(rawValue).trim();
 
-        result.sql_touchpoint_date = normalizedDate;
-        result.status = "success";
+          result[mapping.key] = normalizedValue;
+
+          if (!normalizedValue) {
+            continue;
+          }
+
+          const fieldIdForMapping = additionalFieldIds[mapping.key];
+          if (!fieldIdForMapping) {
+            updateErrors.push(`Missing ActiveCampaign field for ${mapping.perstag}.`);
+            continue;
+          }
+
+          try {
+            await updateFieldValue(baseUrl, apiKey, fieldIdForMapping, resolvedContactId, normalizedValue);
+            updateCount += 1;
+          } catch (error) {
+            updateErrors.push(`Failed to sync ${mapping.perstag}.`);
+          }
+        }
+
+        if (updateCount === 0) {
+          result.status = "skipped";
+          result.error = updateErrors.length > 0 ? updateErrors.join(" ") : "No SQL values to sync.";
+        } else {
+          result.status = "success";
+          result.error = updateErrors.length > 0 ? updateErrors.join(" ") : null;
+        }
+
         results.push(result);
       } catch (error) {
         result.status = "failed";

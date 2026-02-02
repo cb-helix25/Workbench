@@ -7,6 +7,20 @@ type RemediationResult = {
   identifier: string;
   resolved_ac_contact_id: string | null;
   sql_touchpoint_date: string | null;
+  sql_contact_referrer: string | null;
+  sql_method_of_contact: string | null;
+  sql_mailing_street: string | null;
+  sql_referral_url: string | null;
+  sql_point_of_contact: string | null;
+  sql_ultimate_source: string | null;
+  sql_mailing_county: string | null;
+  sql_postal_code: string | null;
+  sql_city: string | null;
+  sql_country: string | null;
+  sql_call_taker: string | null;
+  sql_area_of_work: string | null;
+  sql_initial_first_call_notes: string | null;
+  sql_value: string | null;
   status: "pending" | "success" | "skipped" | "failed";
   error: string | null;
 };
@@ -187,6 +201,20 @@ const ACRemediation = () => {
                   <th>identifier</th>
                   <th>resolved_ac_contact_id</th>
                   <th>sql_touchpoint_date</th>
+                  <th>sql_contact_referrer</th>
+                  <th>sql_method_of_contact</th>
+                  <th>sql_mailing_street</th>
+                  <th>sql_referral_url</th>
+                  <th>sql_point_of_contact</th>
+                  <th>sql_ultimate_source</th>
+                  <th>sql_mailing_county</th>
+                  <th>sql_postal_code</th>
+                  <th>sql_city</th>
+                  <th>sql_country</th>
+                  <th>sql_call_taker</th>
+                  <th>sql_area_of_work</th>
+                  <th>sql_initial_first_call_notes</th>
+                  <th>sql_value</th>
                   <th>status</th>
                   <th>error</th>
                 </tr>
@@ -194,7 +222,7 @@ const ACRemediation = () => {
               <tbody>
                 {results.length === 0 ? (
                   <tr>
-                    <td colSpan={5}>No results yet.</td>
+                    <td colSpan={19}>No results yet.</td>
                   </tr>
                 ) : (
                   results.map((row, index) => (
@@ -202,6 +230,20 @@ const ACRemediation = () => {
                       <td>{row.identifier}</td>
                       <td>{row.resolved_ac_contact_id ?? ""}</td>
                       <td>{row.sql_touchpoint_date ?? ""}</td>
+                      <td>{row.sql_contact_referrer ?? ""}</td>
+                      <td>{row.sql_method_of_contact ?? ""}</td>
+                      <td>{row.sql_mailing_street ?? ""}</td>
+                      <td>{row.sql_referral_url ?? ""}</td>
+                      <td>{row.sql_point_of_contact ?? ""}</td>
+                      <td>{row.sql_ultimate_source ?? ""}</td>
+                      <td>{row.sql_mailing_county ?? ""}</td>
+                      <td>{row.sql_postal_code ?? ""}</td>
+                      <td>{row.sql_city ?? ""}</td>
+                      <td>{row.sql_country ?? ""}</td>
+                      <td>{row.sql_call_taker ?? ""}</td>
+                      <td>{row.sql_area_of_work ?? ""}</td>
+                      <td>{row.sql_initial_first_call_notes ?? ""}</td>
+                      <td>{row.sql_value ?? ""}</td>
                       <td>{row.status}</td>
                       <td>{row.error ?? ""}</td>
                     </tr>

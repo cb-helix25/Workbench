@@ -172,7 +172,7 @@ const normalizePerstag = (value) => String(value || "").replace(/^%|%$/g, "").to
 // Resolve ActiveCampaign custom field IDs using personalization tags (e.g. "%TOUCHPOINT_DATE%").
 // Falls back to matching by title if perstag/tag isn't present.
 const resolveFieldIdsByPerstags = async (baseUrl, apiKey, perstags) => {
-  const url = buildApiUrl(baseUrl, "/fields");
+  const url = buildApiUrl(baseUrl, "/fields?limit=100");
   const payload = await fetchJson(url, {
     method: "GET",
     headers: {
@@ -180,10 +180,22 @@ const resolveFieldIdsByPerstags = async (baseUrl, apiKey, perstags) => {
       Accept: "application/json"
     }
   });
+  
+  console.log("[FIELD-RESOLUTION] API Response Meta:", JSON.stringify(payload?.meta || {}, null, 2));
 
   const fields = payload?.fields || [];
   const map = {};
   const uniquePerstags = Array.from(new Set(perstags.map((tag) => normalizePerstag(tag)).filter(Boolean)));
+
+  console.log("[FIELD-RESOLUTION] Looking for", uniquePerstags.length, "unique perstags");
+  console.log("[FIELD-RESOLUTION] AC returned", fields.length, "fields");
+  
+  // Dump ALL available fields for debugging
+  console.log("\n[FIELD-RESOLUTION] ALL AVAILABLE ACTIVECAMPAIGN FIELDS:");
+  fields.forEach((field, index) => {
+    console.log(`  [${index + 1}] ID: ${field.id}, Title: "${field.title}", Perstag/Tag: "${field.perstag || field.tag || 'NONE'}", Type: ${field.type}`);
+  });
+  console.log("");
 
   uniquePerstags.forEach((tag) => {
     const matchByPerstag = fields.find((field) => {
@@ -193,13 +205,39 @@ const resolveFieldIdsByPerstags = async (baseUrl, apiKey, perstags) => {
 
     if (matchByPerstag?.id) {
       map[tag] = matchByPerstag.id;
+      console.log(`[FIELD-RESOLUTION] ✓ Found ${tag} (perstag match) -> ID: ${matchByPerstag.id}`);
       return;
     }
 
     const matchByTitle = fields.find(
       (field) => normalizePerstag(field?.title) === tag
     );
-    map[tag] = matchByTitle?.id || null;
+    
+    if (matchByTitle?.id) {
+      map[tag] = matchByTitle.id;
+      console.log(`[FIELD-RESOLUTION] ✓ Found ${tag} (title match) -> ID: ${matchByTitle.id}`);
+    } else {
+      map[tag] = null;
+      console.warn(`[FIELD-RESOLUTION] ✗ NOT FOUND: ${tag}`);
+      
+      // Log similar fields for debugging
+      const similar = fields.filter(f => {
+        const title = normalizePerstag(f?.title || "");
+        const perstag = normalizePerstag(f?.perstag || f?.tag || "");
+        return title.includes(tag.split('_')[0]) || tag.includes(title.split('_')[0]) ||
+               perstag.includes(tag.split('_')[0]) || tag.includes(perstag.split('_')[0]);
+      });
+      
+      if (similar.length > 0) {
+        console.warn(`[FIELD-RESOLUTION] Similar fields found:`, similar.map(f => ({
+          id: f.id,
+          title: f.title,
+          perstag: f.perstag || f.tag,
+          normalized_perstag: normalizePerstag(f?.perstag || f?.tag || ""),
+          normalized_title: normalizePerstag(f?.title || "")
+        })));
+      }
+    }
   });
 
   return map;

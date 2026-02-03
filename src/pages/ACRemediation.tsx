@@ -20,6 +20,30 @@ type RemediationResult = {
   error: string | null;
 };
 
+type PoidRemediationResult = {
+  identifier: string;
+  resolved_ac_contact_id: string | null;
+  sql_country_code: string | null;
+  sql_drivers_license_number: string | null;
+  sql_gender: string | null;
+  sql_submission_url: string | null;
+  sql_house_building_number: string | null;
+  sql_nationality: string | null;
+  sql_company_country: string | null;
+  sql_company_county: string | null;
+  sql_company_city: string | null;
+  sql_company_post_code: string | null;
+  sql_company_street: string | null;
+  sql_company_house_building_number: string | null;
+  sql_street: string | null;
+  sql_county: string | null;
+  sql_post_code: string | null;
+  sql_city: string | null;
+  sql_country: string | null;
+  status: "pending" | "success" | "skipped" | "failed";
+  error: string | null;
+};
+
 type TestResult = {
   acConnectionTest: string;
   parsedCount: number;
@@ -49,7 +73,9 @@ const ACRemediation = () => {
   const [identifierType, setIdentifierType] = useState<IdentifierType>("email");
   const [rawInput, setRawInput] = useState("");
   const [results, setResults] = useState<RemediationResult[]>([]);
+  const [poidResults, setPoidResults] = useState<PoidRemediationResult[]>([]);
   const [isRunning, setIsRunning] = useState(false);
+  const [isPoidRunning, setIsPoidRunning] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -107,6 +133,30 @@ const ACRemediation = () => {
     }
   };
 
+  const handlePoidRun = async () => {
+    setIsPoidRunning(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch("/api/ac-remediation/poid-run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifierType, rawInput })
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to run POID remediation.");
+      }
+
+      setPoidResults(payload.results ?? []);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unexpected error.");
+    } finally {
+      setIsPoidRunning(false);
+    }
+  };
+
   return (
     <div>
       <header className="page-header">
@@ -155,11 +205,14 @@ const ACRemediation = () => {
           </div>
 
           <div className="layout">
-            <button type="button" onClick={handleTest} disabled={isTesting || isRunning}>
+            <button type="button" onClick={handleTest} disabled={isTesting || isRunning || isPoidRunning}>
               {isTesting ? "Testing…" : "Test connection & CSV"}
             </button>
-            <button type="button" onClick={handleRun} disabled={isRunning || isTesting}>
+            <button type="button" onClick={handleRun} disabled={isRunning || isTesting || isPoidRunning}>
               {isRunning ? "Syncing…" : "Sync enquiry data to AC"}
+            </button>
+            <button type="button" onClick={handlePoidRun} disabled={isPoidRunning || isTesting || isRunning}>
+              {isPoidRunning ? "Syncing…" : "Sync poid data to AC"}
             </button>
           </div>
 
@@ -188,7 +241,7 @@ const ACRemediation = () => {
         </section>
 
         <section className="panel">
-          <h2>Results</h2>
+          <h2>Enquiry Sync Results</h2>
           <div className="table-wrap">
             <table id="dataTable">
               <thead>
@@ -229,6 +282,71 @@ const ACRemediation = () => {
                       <td>{row.sql_area_of_work ?? ""}</td>
                       <td>{row.sql_initial_first_call_notes ?? ""}</td>
                       <td>{row.sql_value ?? ""}</td>
+                      <td>{row.status}</td>
+                      <td>{row.error ?? ""}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section className="panel">
+          <h2>POID Sync Results</h2>
+          <div className="table-wrap">
+            <table id="poidDataTable">
+              <thead>
+                <tr>
+                  <th>identifier</th>
+                  <th>resolved_ac_contact_id</th>
+                  <th>sql_country_code</th>
+                  <th>sql_drivers_license_number</th>
+                  <th>sql_gender</th>
+                  <th>sql_submission_url</th>
+                  <th>sql_house_building_number</th>
+                  <th>sql_nationality</th>
+                  <th>sql_company_country</th>
+                  <th>sql_company_county</th>
+                  <th>sql_company_city</th>
+                  <th>sql_company_post_code</th>
+                  <th>sql_company_street</th>
+                  <th>sql_company_house_building_number</th>
+                  <th>sql_street</th>
+                  <th>sql_county</th>
+                  <th>sql_post_code</th>
+                  <th>sql_city</th>
+                  <th>sql_country</th>
+                  <th>status</th>
+                  <th>error</th>
+                </tr>
+              </thead>
+              <tbody>
+                {poidResults.length === 0 ? (
+                  <tr>
+                    <td colSpan={21}>No results yet.</td>
+                  </tr>
+                ) : (
+                  poidResults.map((row, index) => (
+                    <tr key={`${row.identifier}-${index}`}>
+                      <td>{row.identifier}</td>
+                      <td>{row.resolved_ac_contact_id ?? ""}</td>
+                      <td>{row.sql_country_code ?? ""}</td>
+                      <td>{row.sql_drivers_license_number ?? ""}</td>
+                      <td>{row.sql_gender ?? ""}</td>
+                      <td>{row.sql_submission_url ?? ""}</td>
+                      <td>{row.sql_house_building_number ?? ""}</td>
+                      <td>{row.sql_nationality ?? ""}</td>
+                      <td>{row.sql_company_country ?? ""}</td>
+                      <td>{row.sql_company_county ?? ""}</td>
+                      <td>{row.sql_company_city ?? ""}</td>
+                      <td>{row.sql_company_post_code ?? ""}</td>
+                      <td>{row.sql_company_street ?? ""}</td>
+                      <td>{row.sql_company_house_building_number ?? ""}</td>
+                      <td>{row.sql_street ?? ""}</td>
+                      <td>{row.sql_county ?? ""}</td>
+                      <td>{row.sql_post_code ?? ""}</td>
+                      <td>{row.sql_city ?? ""}</td>
+                      <td>{row.sql_country ?? ""}</td>
                       <td>{row.status}</td>
                       <td>{row.error ?? ""}</td>
                     </tr>

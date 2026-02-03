@@ -44,6 +44,14 @@ type PoidRemediationResult = {
   error: string | null;
 };
 
+type ClearRemediationResult = {
+  identifier: string;
+  resolved_ac_contact_id: string | null;
+  cleared_fields: string[];
+  status: "pending" | "success" | "skipped" | "failed";
+  error: string | null;
+};
+
 type TestResult = {
   acConnectionTest: string;
   parsedCount: number;
@@ -74,8 +82,10 @@ const ACRemediation = () => {
   const [rawInput, setRawInput] = useState("");
   const [results, setResults] = useState<RemediationResult[]>([]);
   const [poidResults, setPoidResults] = useState<PoidRemediationResult[]>([]);
+  const [clearResults, setClearResults] = useState<ClearRemediationResult[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [isPoidRunning, setIsPoidRunning] = useState(false);
+  const [isClearRunning, setIsClearRunning] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -157,6 +167,30 @@ const ACRemediation = () => {
     }
   };
 
+  const handleClearRun = async () => {
+    setIsClearRunning(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch("/api/ac-remediation/clear-run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifierType, rawInput })
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to clear ActiveCampaign fields.");
+      }
+
+      setClearResults(payload.results ?? []);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unexpected error.");
+    } finally {
+      setIsClearRunning(false);
+    }
+  };
+
   return (
     <div>
       <header className="page-header">
@@ -164,8 +198,12 @@ const ACRemediation = () => {
           <p className="eyebrow">Admin tool</p>
           <h1>AC Remediation</h1>
           <p>
-            Bulk sync Touchpoint Date values from SQL into ActiveCampaign contacts using a pasted list
+            Bulk sync values from SQL into ActiveCampaign contacts using a pasted list
             from your spreadsheet export.
+          </p>
+          <p>
+            Use the same identifier list to clear specific AC fields without touching SQL:
+            %PROFESSION_TAG%, %COGNITO_SUBMISSION%, %ADDRESS_KIND%, %FIXED_FEE_QUOTE%.
           </p>
           <Link className="back-link" to="/">
             Back to home
@@ -205,14 +243,33 @@ const ACRemediation = () => {
           </div>
 
           <div className="layout">
-            <button type="button" onClick={handleTest} disabled={isTesting || isRunning || isPoidRunning}>
+            <button
+              type="button"
+              onClick={handleTest}
+              disabled={isTesting || isRunning || isPoidRunning || isClearRunning}
+            >
               {isTesting ? "Testing…" : "Test connection & CSV"}
             </button>
-            <button type="button" onClick={handleRun} disabled={isRunning || isTesting || isPoidRunning}>
+            <button
+              type="button"
+              onClick={handleRun}
+              disabled={isRunning || isTesting || isPoidRunning || isClearRunning}
+            >
               {isRunning ? "Syncing…" : "Sync enquiry data to AC"}
             </button>
-            <button type="button" onClick={handlePoidRun} disabled={isPoidRunning || isTesting || isRunning}>
+            <button
+              type="button"
+              onClick={handlePoidRun}
+              disabled={isPoidRunning || isTesting || isRunning || isClearRunning}
+            >
               {isPoidRunning ? "Syncing…" : "Sync poid data to AC"}
+            </button>
+            <button
+              type="button"
+              onClick={handleClearRun}
+              disabled={isClearRunning || isTesting || isRunning || isPoidRunning}
+            >
+              {isClearRunning ? "Clearing…" : "Clear selected AC fields"}
             </button>
           </div>
 
@@ -238,6 +295,43 @@ const ACRemediation = () => {
               )}
             </div>
           ) : null}
+        </section>
+        <section className="panel">
+          <h2>Clear AC Fields</h2>
+          <p className="hint">
+            Clears the following personalization tags in ActiveCampaign only: %PROFESSION_TAG%,
+            %COGNITO_SUBMISSION%, %ADDRESS_KIND%, %FIXED_FEE_QUOTE%.
+          </p>
+          <div className="table-wrap">
+            <table id="clearDataTable">
+              <thead>
+                <tr>
+                  <th>identifier</th>
+                  <th>resolved_ac_contact_id</th>
+                  <th>cleared_fields</th>
+                  <th>status</th>
+                  <th>error</th>
+                </tr>
+              </thead>
+              <tbody>
+                {clearResults.length === 0 ? (
+                  <tr>
+                    <td colSpan={5}>No results yet.</td>
+                  </tr>
+                ) : (
+                  clearResults.map((row, index) => (
+                    <tr key={`${row.identifier}-${index}`}>
+                      <td>{row.identifier}</td>
+                      <td>{row.resolved_ac_contact_id ?? ""}</td>
+                      <td>{row.cleared_fields.join(", ")}</td>
+                      <td>{row.status}</td>
+                      <td>{row.error ?? ""}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </section>
 
         <section className="panel">

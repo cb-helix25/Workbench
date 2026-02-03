@@ -73,6 +73,12 @@ const POID_FIELD_MAPPINGS = [
   { key: "sql_city", column: "city", perstag: "%MAILING_CITY%" },
   { key: "sql_country", column: "country", perstag: "%MAILING_COUNTRY%" }
 ];
+const CLEAR_FIELD_MAPPINGS = [
+  { key: "ac_profession_tag", perstag: "%PROFESSION_TAG%" },
+  { key: "ac_cognito_submission", perstag: "%COGNITO_SUBMISSION%" },
+  { key: "ac_address_kind", perstag: "%ADDRESS_KIND%" },
+  { key: "ac_fixed_fee_quote", perstag: "%FIXED_FEE_QUOTE%" }
+];
 
 const normalizeHeader = (value) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
 
@@ -840,6 +846,137 @@ function createAcRemediationRouter() {
         result.error = error.message || "Unknown error.";
         results.push(result);
         console.error("[AC-REMEDIATION-POID] Failed to sync contact", {
+          identifier,
+          identifierType,
+          error
+        });
+      }
+    }
+
+    res.json({ results });
+  });
+
+  router.post("/clear-run", async (req, res) => {
+    const { identifierType, rawInput } = req.body || {};
+
+    if (identifierType !== "email" && identifierType !== "ac_contact_id") {
+      return res.status(400).json({ error: "identifierType must be 'email' or 'ac_contact_id'." });
+    }
+
+    let identifiers;
+    try {
+      identifiers = parseRawInput(rawInput, identifierType);
+    } catch (error) {
+      return res.status(400).json({ error: error.message || "Failed to parse input." });
+    }
+
+    const secretClient = req.app.locals.secretClient;
+
+    if (!secretClient) {
+      return res.status(500).json({ error: "SecretClient is not available." });
+    }
+
+    let baseUrl, apiKey;
+    try {
+      console.log("[AC-REMEDIATION-CLEAR] Fetching secrets from Key Vault...");
+      const baseUrlSecret = await secretClient.getSecret("ac-base-url");
+      const apiKeySecret = await secretClient.getSecret("ac-api-token");
+
+      baseUrl = baseUrlSecret?.value;
+      apiKey = apiKeySecret?.value;
+
+      console.log("[AC-REMEDIATION-CLEAR] Base URL retrieved:", baseUrl ? "✓" : "✗");
+      console.log("[AC-REMEDIATION-CLEAR] API Key retrieved:", apiKey ? "✓" : "✗");
+
+      if (!baseUrl || !apiKey) {
+        return res.status(500).json({ error: "Failed to retrieve ActiveCampaign secrets from Key Vault." });
+      }
+    } catch (error) {
+      console.error("[AC-REMEDIATION-CLEAR] Key Vault error:", error);
+      return res.status(500).json({
+        error: "Failed to fetch ActiveCampaign secrets from Key Vault.",
+        details: error.message
+      });
+    }
+
+    const perstagsToResolve = CLEAR_FIELD_MAPPINGS.map((mapping) => mapping.perstag);
+
+    let fieldIdMap;
+    try {
+      fieldIdMap = await resolveFieldIdsByPerstags(baseUrl, apiKey, perstagsToResolve);
+    } catch (error) {
+      console.error("[AC-REMEDIATION-CLEAR] Failed to resolve field IDs:", error);
+      return res.status(500).json({
+        error: "Failed to resolve field IDs from ActiveCampaign.",
+        details: error.message
+      });
+    }
+
+    const clearFieldIds = CLEAR_FIELD_MAPPINGS.reduce((acc, mapping) => {
+      const normalizedTag = normalizePerstag(mapping.perstag);
+      acc[mapping.key] = fieldIdMap[normalizedTag] || null;
+      return acc;
+    }, {});
+
+    const results = [];
+
+    for (const identifier of identifiers) {
+      const result = {
+        identifier,
+        resolved_ac_contact_id: null,
+        cleared_fields: [],
+        status: "pending",
+        error: null
+      };
+
+      try {
+        const resolvedContactId =
+          identifierType === "ac_contact_id"
+            ? identifier
+            : await fetchAcContactIdByEmail(baseUrl, apiKey, identifier);
+
+        if (!resolvedContactId) {
+          result.status = "skipped";
+          result.error = "ActiveCampaign contact not found.";
+          results.push(result);
+          continue;
+        }
+
+        result.resolved_ac_contact_id = resolvedContactId;
+
+        let updateCount = 0;
+        const updateErrors = [];
+
+        for (const mapping of CLEAR_FIELD_MAPPINGS) {
+          const fieldIdForMapping = clearFieldIds[mapping.key];
+          if (!fieldIdForMapping) {
+            updateErrors.push(`Missing ActiveCampaign field for ${mapping.perstag}.`);
+            continue;
+          }
+
+          try {
+            await updateFieldValue(baseUrl, apiKey, fieldIdForMapping, resolvedContactId, "");
+            result.cleared_fields.push(mapping.perstag);
+            updateCount += 1;
+          } catch (error) {
+            updateErrors.push(`Failed to clear ${mapping.perstag}.`);
+          }
+        }
+
+        if (updateCount === 0) {
+          result.status = "skipped";
+          result.error = updateErrors.length > 0 ? updateErrors.join(" ") : "No fields were cleared.";
+        } else {
+          result.status = "success";
+          result.error = updateErrors.length > 0 ? updateErrors.join(" ") : null;
+        }
+
+        results.push(result);
+      } catch (error) {
+        result.status = "failed";
+        result.error = error.message || "Unknown error.";
+        results.push(result);
+        console.error("[AC-REMEDIATION-CLEAR] Failed to clear contact fields", {
           identifier,
           identifierType,
           error

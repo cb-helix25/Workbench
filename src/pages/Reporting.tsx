@@ -35,6 +35,9 @@ const initReportingHub = (apiBase: string) => {
   const refreshButton = document.getElementById("refreshButton") as HTMLButtonElement | null;
   const insertButton = document.getElementById("insertButton") as HTMLButtonElement | null;
   const queryForm = document.getElementById("queryForm") as HTMLFormElement | null;
+  const queryColumnInput = document.getElementById("queryColumn") as HTMLInputElement | null;
+  const queryValueInput = document.getElementById("queryValue") as HTMLInputElement | null;
+  const queryTextarea = document.getElementById("queryText") as HTMLTextAreaElement | null;
   const pageGuard = document.getElementById("pageGuard") as HTMLDivElement | null;
   const pagePasscodeInput = document.getElementById("pagePasscode") as HTMLInputElement | null;
   const pageUnlockButton = document.getElementById("unlockPage") as HTMLButtonElement | null;
@@ -63,6 +66,9 @@ const initReportingHub = (apiBase: string) => {
     !refreshButton ||
     !insertButton ||
     !queryForm ||
+    !queryColumnInput ||
+    !queryValueInput ||
+    !queryTextarea ||
     !refreshButton ||
     !insertButton ||
     !insertForm ||
@@ -131,10 +137,16 @@ const initReportingHub = (apiBase: string) => {
     setCommitEnabled(deleteCommitButton, false);
   };
 
+  const updateQueryTemplate = () => {
+    const selectedTable = tableSelect.value || `${currentSelection.schema}.${currentSelection.table}`;
+    const columnValue = queryColumnInput.value.trim() || "X";
+    const filterValue = queryValueInput.value.trim() || "Y";
+    queryTextarea.value = `SELECT * FROM ${selectedTable} WHERE ${columnValue} = ${filterValue};`;
+  };
+
   const setQueryLockState = (locked: boolean) => {
     queryUnlocked = !locked;
     queryForm.dataset.locked = locked ? "true" : "false";
-    const queryTextarea = queryForm.querySelector("textarea[name='query']") as HTMLTextAreaElement | null;
     const queryButton = queryForm.querySelector("button[type='submit']") as HTMLButtonElement | null;
     if (queryTextarea) queryTextarea.disabled = locked;
     if (queryButton) queryButton.disabled = locked;
@@ -296,6 +308,7 @@ const initReportingHub = (apiBase: string) => {
 
     renderSchema(schemaResponse.columns);
     renderRows(rowResponse.rows);
+    updateQueryTemplate();
 
     setStatus(`Loaded ${schema}.${table}`);
   };
@@ -355,9 +368,7 @@ const initReportingHub = (apiBase: string) => {
 
   const handleQuery = async (event: SubmitEvent) => {
     event.preventDefault();
-    const queryForm = event.target as HTMLFormElement;
-    const queryInput = queryForm.querySelector("textarea[name='query']") as HTMLTextAreaElement;
-    const query = queryInput?.value.trim();
+    const query = queryTextarea.value.trim();
 
     if (!queryUnlocked || !queryPasscode) {
       setStatus("Enter the passcode to unlock queries.", "error");
@@ -396,6 +407,7 @@ const initReportingHub = (apiBase: string) => {
   };
 
   const handleTableChange = () => {
+    updateQueryTemplate();
     loadSchemaAndRows().catch((error: Error) => {
       setStatus(error.message, "error");
     });
@@ -638,6 +650,8 @@ const initReportingHub = (apiBase: string) => {
   refreshButton.addEventListener("click", handleRefresh);
   tableSelect.addEventListener("change", handleTableChange);
   queryForm.addEventListener("submit", handleQuery);
+  queryColumnInput.addEventListener("input", updateQueryTemplate);
+  queryValueInput.addEventListener("input", updateQueryTemplate);
   insertButton.addEventListener("click", handleOpenInsert);
   insertDialog.addEventListener("click", handleInsertDialogClick);
   updateDialog.addEventListener("click", handleUpdateDialogClick);
@@ -672,6 +686,8 @@ const initReportingHub = (apiBase: string) => {
     refreshButton.removeEventListener("click", handleRefresh);
     tableSelect.removeEventListener("change", handleTableChange);
     queryForm.removeEventListener("submit", handleQuery);
+    queryColumnInput.removeEventListener("input", updateQueryTemplate);
+    queryValueInput.removeEventListener("input", updateQueryTemplate);
     insertButton.removeEventListener("click", handleOpenInsert);
     insertDialog.removeEventListener("click", handleInsertDialogClick);
     updateDialog.removeEventListener("click", handleUpdateDialogClick);
@@ -746,10 +762,23 @@ const ReportingPage = ({ title, description, apiBase }: ReportingPageProps) => {
             </div>
             <div className="query-section">
               <h3>Custom Query</h3>
-              <p className="hint">Page access is protected by a passcode.</p>
               <form id="queryForm" className="form">
+                <label className="field">
+                  <span>Column (X)</span>
+                  <input id="queryColumn" name="queryColumn" placeholder="IssueId" />
+                </label>
+                <label className="field">
+                  <span>Value (Y)</span>
+                  <input id="queryValue" name="queryValue" placeholder="123" />
+                </label>
                 <label>
-                  <textarea name="query" rows={3} placeholder="SELECT * FROM [table] WHERE ..."></textarea>
+                  <textarea
+                    id="queryText"
+                    name="query"
+                    rows={3}
+                    readOnly
+                    placeholder="SELECT * FROM [table] WHERE X = Y;"
+                  ></textarea>
                 </label>
                 <button type="submit">Execute Query</button>
               </form>

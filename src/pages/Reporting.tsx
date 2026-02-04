@@ -621,18 +621,27 @@ const initReportingHub = (apiBase: string) => {
       setPageStatus("Enter the passcode provided by your admin.", true);
       return;
     }
-    queryPasscode = passcode;
-    pagePasscodeInput.value = "";
-    setPageLockState(false);
-    setPageStatus("Access unlocked for this session.", false);
-    setStatus("Loading tables…");
     try {
+      setPageStatus("Validating passcode…", false);
+      setStatus("Validating passcode…");
+      await fetchJson(`${apiBase}/validate-passcode`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passcode })
+      });
+      queryPasscode = passcode;
+      pagePasscodeInput.value = "";
+      setPageLockState(false);
+      setPageStatus("Access unlocked for this session.", false);
+      setStatus("Loading tables…");
       await loadTables();
       await loadSchemaAndRows();
       resetPendingActions();
       setStatus("Ready");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Failed to connect.", "error");
+      const message = error instanceof Error ? error.message : "Passcode validation failed.";
+      setPageStatus(message, true);
+      setStatus(message, "error");
     }
   };
 

@@ -68,6 +68,14 @@ async function fetchColumns(schema, table, secretClient, workspaceKey) {
 function createReportingRouter(workspaceKey) {
   const router = express.Router();
 
+  router.post("/validate-passcode", (req, res) => {
+    if (!assertQueryPasscode(req, res)) {
+      return;
+    }
+
+    res.json({ ok: true });
+  });
+
   router.get("/tables", async (req, res) => {
     try {
       const secretClient = req.app.locals.secretClient;
